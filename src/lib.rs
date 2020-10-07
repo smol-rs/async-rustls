@@ -1,4 +1,6 @@
-//! Asynchronous TLS/SSL streams using [Rustls](https://github.com/ctz/rustls).
+//! Asynchronous TLS/SSL streams using [`rustls`].
+//!
+//! [`rustls`]: https://docs.rs/rustls
 
 pub mod client;
 mod common;
