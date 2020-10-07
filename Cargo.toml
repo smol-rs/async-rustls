@@ -1,14 +1,20 @@
 [package]
 name = "async-rustls"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
   "Alex Crichton <alex@alexcrichton.com>",
   "quininer kel <quininer@live.com>",
   "Stjepan Glavina <stjepang@gmail.com>",
 ]
 edition = "2018"
-description = "WIP"
+description = "Async TLS/SSL streams using rustls"
 license = "Apache-2.0 OR MIT"
+repository = "https://github.com/stjepang/async-rustls"
+homepage = "https://github.com/stjepang/async-rustls"
+documentation = "https://docs.rs/async-rustls"
+keywords = ["rustls", "tls", "ssl", "synchronization"]
+categories = ["asynchronous", "cryptography", "network-programming"]
+readme = "README.md"
 
 [dependencies]
 futures-lite = "1.10.1"
