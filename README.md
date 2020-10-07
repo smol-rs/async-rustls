@@ -24,8 +24,8 @@ at your option.
 
 This crate started as a fork of [`tokio-rustls`], which started as a fork of [`tokio-tls`].
 
-[`tokio-rustls`]: https://docs.rs/tokio-rustls
-[`tokio-tls`]: https://docs.rs/tokio-tls
+[`tokio-rustls`]: https://github.com/tokio-rs/tls/tree/master/tokio-rustls
+[`tokio-tls`]: https://github.com/alexcrichton/tokio-tls
 
 #### Contribution
 
