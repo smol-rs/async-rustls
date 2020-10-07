@@ -1,0 +1,11 @@
+[package]
+name = "client"
+version = "0.1.0"
+authors = ["quininer <quininer@live.com>"]
+edition = "2018"
+
+[dependencies]
+tokio = { version = "0.2", features = [ "full" ] }
+argh = "0.1"
+tokio-rustls = { path = "../.." }
+webpki-roots = "0.20"
