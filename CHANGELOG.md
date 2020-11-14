@@ -1,3 +1,7 @@
+# Version 0.1.2
+
+- Expose feature flags from rustls.
+
 # Version 0.1.1
 
 - Add more info to Cargo.toml
