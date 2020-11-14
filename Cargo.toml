@@ -16,10 +16,19 @@ keywords = ["rustls", "tls", "ssl", "synchronization"]
 categories = ["asynchronous", "cryptography", "network-programming"]
 readme = "README.md"
 
+[features]
+default = ["logging"]
+logging = ["rustls/logging"]
+dangerous_configuration = ["rustls/dangerous_configuration"]
+quic = ["rustls/quic"]
+
 [dependencies]
 futures-lite = "1.10.1"
-rustls = "0.18"
 webpki = "0.21"
+
+[dependencies.rustls]
+version = "0.18"
+default-features = false
 
 [dev-dependencies]
 lazy_static = "1"
