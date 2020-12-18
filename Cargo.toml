@@ -27,7 +27,7 @@ futures-lite = "1.10.1"
 webpki = "0.21"
 
 [dependencies.rustls]
-version = "0.18"
+version = "0.19"
 default-features = false
 
 [dev-dependencies]
