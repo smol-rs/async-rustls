@@ -1,9 +1,9 @@
 # async-rustls
 
-[![Build](https://github.com/stjepang/async-rustls/workflows/Build%20and%20test/badge.svg)](
-https://github.com/stjepang/async-rustls/actions)
+[![Build](https://github.com/smol-rs/async-rustls/workflows/Build%20and%20test/badge.svg)](
+https://github.com/smol-rs/async-rustls/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](
-https://github.com/stjepang/async-rustls)
+https://github.com/smol-rs/async-rustls)
 [![Cargo](https://img.shields.io/crates/v/async-rustls.svg)](
 https://crates.io/crates/async-rustls)
 [![Documentation](https://docs.rs/async-rustls/badge.svg)](
