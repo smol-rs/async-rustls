@@ -14,7 +14,6 @@ homepage = "https://github.com/smol-rs/async-rustls"
 documentation = "https://docs.rs/async-rustls"
 keywords = ["rustls", "tls", "ssl", "synchronization"]
 categories = ["asynchronous", "cryptography", "network-programming"]
-readme = "README.md"
 
 [features]
 default = ["logging"]
