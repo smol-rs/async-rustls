@@ -110,6 +110,18 @@ impl TlsAcceptor {
     }
 }
 
+#[async_tls_acceptor::async_trait]
+impl<Input> async_tls_acceptor::Acceptor<Input> for TlsAcceptor
+where
+    Input: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static,
+{
+    type Output = server::TlsStream<Input>;
+    type Error = std::io::Error;
+    async fn accept(&self, input: Input) -> Result<Self::Output, Self::Error> {
+        TlsAcceptor::accept(&self, input).await
+    }
+}
+
 /// Future returned from `TlsConnector::connect` which will resolve
 /// once the connection handshake has finished.
 pub struct Connect<IO>(MidHandshake<client::TlsStream<IO>>);

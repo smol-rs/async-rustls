@@ -24,6 +24,7 @@ quic = ["rustls/quic"]
 [dependencies]
 futures-lite = "1.10.1"
 webpki = "0.21"
+async-tls-acceptor = "0.1.0"
 
 [dependencies.rustls]
 version = "0.19"
