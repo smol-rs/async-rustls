@@ -1,10 +1,10 @@
+use async_rustls::{client::TlsStream, TlsConnector};
 use rustls::ClientConfig;
+use smol::net::TcpStream;
+use smol::prelude::*;
 use std::io;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
-use smol::net::TcpStream;
-use smol::prelude::*;
-use async_rustls::{client::TlsStream, TlsConnector};
 
 async fn get(
     config: Arc<ClientConfig>,
@@ -30,18 +30,18 @@ async fn get(
 #[test]
 fn test_tls12() -> io::Result<()> {
     smol::block_on(async {
-    let mut config = ClientConfig::new();
-    config
-        .root_store
-        .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
-    config.versions = vec![rustls::ProtocolVersion::TLSv1_2];
-    let config = Arc::new(config);
-    let domain = "tls-v1-2.badssl.com";
+        let mut config = ClientConfig::new();
+        config
+            .root_store
+            .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+        config.versions = vec![rustls::ProtocolVersion::TLSv1_2];
+        let config = Arc::new(config);
+        let domain = "tls-v1-2.badssl.com";
 
-    let (_, output) = get(config.clone(), domain, 1012).await?;
-    assert!(output.contains("<title>tls-v1-2.badssl.com</title>"));
+        let (_, output) = get(config.clone(), domain, 1012).await?;
+        assert!(output.contains("<title>tls-v1-2.badssl.com</title>"));
 
-    Ok(())
+        Ok(())
     })
 }
 
@@ -55,16 +55,16 @@ fn test_tls13() {
 #[test]
 fn test_modern() -> io::Result<()> {
     smol::block_on(async {
-    let mut config = ClientConfig::new();
-    config
-        .root_store
-        .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
-    let config = Arc::new(config);
-    let domain = "mozilla-modern.badssl.com";
+        let mut config = ClientConfig::new();
+        config
+            .root_store
+            .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+        let config = Arc::new(config);
+        let domain = "mozilla-modern.badssl.com";
 
-    let (_, output) = get(config.clone(), domain, 443).await?;
-    assert!(output.contains("<title>mozilla-modern.badssl.com</title>"));
+        let (_, output) = get(config.clone(), domain, 443).await?;
+        assert!(output.contains("<title>mozilla-modern.badssl.com</title>"));
 
-    Ok(())
+        Ok(())
     })
 }

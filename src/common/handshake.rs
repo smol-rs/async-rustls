@@ -1,10 +1,10 @@
 use crate::common::{Stream, TlsState};
+use futures_lite::io::{AsyncRead, AsyncWrite};
 use rustls::Session;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::{io, mem};
-use futures_lite::io::{AsyncRead, AsyncWrite};
 
 pub(crate) trait IoSession {
     type Io;
