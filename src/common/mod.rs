@@ -35,26 +35,17 @@ impl TlsState {
 
     #[inline]
     pub fn writeable(&self) -> bool {
-        match *self {
-            TlsState::WriteShutdown | TlsState::FullyShutdown => false,
-            _ => true,
-        }
+        !matches!(self, TlsState::WriteShutdown | TlsState::FullyShutdown)
     }
 
     #[inline]
     pub fn readable(&self) -> bool {
-        match self {
-            TlsState::ReadShutdown | TlsState::FullyShutdown => false,
-            _ => true,
-        }
+        !matches!(self, TlsState::ReadShutdown | TlsState::FullyShutdown)
     }
 
     #[inline]
     pub fn is_early_data(&self) -> bool {
-        match self {
-            TlsState::EarlyData(..) => true,
-            _ => false,
-        }
+        matches!(self, TlsState::EarlyData(..))
     }
 }
 

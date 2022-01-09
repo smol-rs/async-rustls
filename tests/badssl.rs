@@ -15,7 +15,7 @@ async fn get(
     let input = format!("GET / HTTP/1.0\r\nHost: {}\r\n\r\n", domain);
 
     let addr = (domain, port).to_socket_addrs()?.next().unwrap();
-    let domain = webpki::DNSNameRef::try_from_ascii_str(&domain).unwrap();
+    let domain = webpki::DNSNameRef::try_from_ascii_str(domain).unwrap();
     let mut buf = Vec::new();
 
     let stream = TcpStream::connect(&addr).await?;

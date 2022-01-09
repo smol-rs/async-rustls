@@ -111,7 +111,7 @@ impl AsyncWrite for Eof {
 #[test]
 fn stream_good() -> io::Result<()> {
     smol::block_on(async {
-        const FILE: &'static [u8] = include_bytes!("../../Cargo.toml");
+        const FILE: &[u8] = include_bytes!("../../Cargo.toml");
 
         let (mut server, mut client) = make_pair();
         poll_fn(|cx| do_handshake(&mut client, &mut server, cx)).await?;
