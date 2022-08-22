@@ -1,7 +1,7 @@
 use super::*;
 use crate::common::IoSession;
 use futures_lite::ready;
-use rustls::Session;
+use rustls::{ClientConnection, client::ClientConnectionData, ConnectionCommon};
 use std::io::Write;
 
 /// A wrapper around an underlying raw stream which implements the TLS or SSL
@@ -9,30 +9,30 @@ use std::io::Write;
 #[derive(Debug)]
 pub struct TlsStream<IO> {
     pub(crate) io: IO,
-    pub(crate) session: ClientSession,
+    pub(crate) session: ClientConnection,
     pub(crate) state: TlsState,
 }
 
 impl<IO> TlsStream<IO> {
     #[inline]
-    pub fn get_ref(&self) -> (&IO, &ClientSession) {
+    pub fn get_ref(&self) -> (&IO, &ClientConnection) {
         (&self.io, &self.session)
     }
 
     #[inline]
-    pub fn get_mut(&mut self) -> (&mut IO, &mut ClientSession) {
+    pub fn get_mut(&mut self) -> (&mut IO, &mut ClientConnection) {
         (&mut self.io, &mut self.session)
     }
 
     #[inline]
-    pub fn into_inner(self) -> (IO, ClientSession) {
+    pub fn into_inner(self) -> (IO, ClientConnection) {
         (self.io, self.session)
     }
 }
 
 impl<IO> IoSession for TlsStream<IO> {
     type Io = IO;
-    type Session = ClientSession;
+    type Session = ClientConnectionData;
 
     #[inline]
     fn skip_handshake(&self) -> bool {
@@ -40,7 +40,7 @@ impl<IO> IoSession for TlsStream<IO> {
     }
 
     #[inline]
-    fn get_mut(&mut self) -> (&mut TlsState, &mut Self::Io, &mut Self::Session) {
+    fn get_mut(&mut self) -> (&mut TlsState, &mut Self::Io, &mut ConnectionCommon<Self::Session>) {
         (&mut self.state, &mut self.io, &mut self.session)
     }
 

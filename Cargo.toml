@@ -1,6 +1,6 @@
 [package]
 name = "async-rustls"
-version = "0.2.0"
+version = "0.3.0"
 authors = [
   "Alex Crichton <alex@alexcrichton.com>",
   "quininer kel <quininer@live.com>",
@@ -26,10 +26,12 @@ futures-lite = "1.10.1"
 webpki = "0.21"
 
 [dependencies.rustls]
-version = "0.19"
+version = "0.20"
 default-features = false
 
 [dev-dependencies]
 lazy_static = "1"
+rustls = { version = "0.20", default-features = false, features = ["tls12"] }
+rustls-pemfile = { version = "1.0.1", default-features = false }
 smol = "1.2.3"
 webpki-roots = "0.20"

@@ -2,8 +2,9 @@ mod handshake;
 
 use futures_lite::io::{AsyncRead, AsyncWrite};
 pub(crate) use handshake::{IoSession, MidHandshake};
-use rustls::Session;
+use rustls::ConnectionCommon;
 use std::io::{self, Read, Write};
+use std::ops::DerefMut;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -55,7 +56,7 @@ pub struct Stream<'a, IO, S> {
     pub eof: bool,
 }
 
-impl<'a, IO: AsyncRead + AsyncWrite + Unpin, S: Session> Stream<'a, IO, S> {
+impl<'a, IO: AsyncRead + AsyncWrite + Unpin, StateIo, S: DerefMut<Target = ConnectionCommon<StateIo>>> Stream<'a, IO, S> {
     pub fn new(io: &'a mut IO, session: &'a mut S) -> Self {
         Stream {
             io,
@@ -192,7 +193,7 @@ impl<'a, IO: AsyncRead + AsyncWrite + Unpin, S: Session> Stream<'a, IO, S> {
     }
 }
 
-impl<'a, IO: AsyncRead + AsyncWrite + Unpin, S: Session> AsyncRead for Stream<'a, IO, S> {
+impl<'a, IO: AsyncRead + AsyncWrite + Unpin, StateIo, S: DerefMut<Target = ConnectionCommon<StateIo>>> AsyncRead for Stream<'a, IO, S> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
@@ -219,7 +220,7 @@ impl<'a, IO: AsyncRead + AsyncWrite + Unpin, S: Session> AsyncRead for Stream<'a
                 }
             }
 
-            return match self.session.read(&mut buf[pos..]) {
+            return match self.session.reader().read(&mut buf[pos..]) {
                 Ok(0) if pos == 0 && would_block => Poll::Pending,
                 Ok(n) if self.eof || would_block => Poll::Ready(Ok(pos + n)),
                 Ok(n) => {
@@ -238,7 +239,7 @@ impl<'a, IO: AsyncRead + AsyncWrite + Unpin, S: Session> AsyncRead for Stream<'a
     }
 }
 
-impl<'a, IO: AsyncRead + AsyncWrite + Unpin, S: Session> AsyncWrite for Stream<'a, IO, S> {
+impl<'a, IO: AsyncRead + AsyncWrite + Unpin, StateIo, S: DerefMut<Target = ConnectionCommon<StateIo>>> AsyncWrite for Stream<'a, IO, S> {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
@@ -249,7 +250,7 @@ impl<'a, IO: AsyncRead + AsyncWrite + Unpin, S: Session> AsyncWrite for Stream<'
         while pos != buf.len() {
             let mut would_block = false;
 
-            match self.session.write(&buf[pos..]) {
+            match self.session.writer().write(&buf[pos..]) {
                 Ok(n) => pos += n,
                 Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => (),
                 Err(err) => return Poll::Ready(Err(err)),
@@ -277,7 +278,7 @@ impl<'a, IO: AsyncRead + AsyncWrite + Unpin, S: Session> AsyncWrite for Stream<'
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        self.session.flush()?;
+        self.session.writer().flush()?;
         while self.session.wants_write() {
             futures_lite::ready!(self.write_io(cx))?;
         }

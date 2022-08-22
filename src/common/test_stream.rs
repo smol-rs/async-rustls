@@ -2,17 +2,18 @@ use super::Stream;
 use futures_lite::future::poll_fn;
 use futures_lite::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use futures_lite::ready;
-use rustls::internal::pemfile::{certs, rsa_private_keys};
-use rustls::{ClientConfig, ClientSession, NoClientAuth, ServerConfig, ServerSession, Session};
+use rustls::server::NoClientAuth;
+use rustls_pemfile::{certs, rsa_private_keys};
+use rustls::{ClientConfig, ClientConnection, ServerConfig, ServerConnection, Certificate, PrivateKey, RootCertStore, ServerName, ConnectionCommon};
+use std::convert::TryFrom;
 use std::io::{self, BufReader, Cursor, Read, Write};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use webpki::DNSNameRef;
 
-struct Good<'a>(&'a mut dyn Session);
+struct Good<'a, IO>(&'a mut ConnectionCommon<IO>);
 
-impl<'a> AsyncRead for Good<'a> {
+impl<'a, IO> AsyncRead for Good<'a, IO> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
@@ -22,7 +23,7 @@ impl<'a> AsyncRead for Good<'a> {
     }
 }
 
-impl<'a> AsyncWrite for Good<'a> {
+impl<'a, IO> AsyncWrite for Good<'a, IO> {
     fn poll_write(
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
@@ -115,7 +116,7 @@ fn stream_good() -> io::Result<()> {
 
         let (mut server, mut client) = make_pair();
         poll_fn(|cx| do_handshake(&mut client, &mut server, cx)).await?;
-        io::copy(&mut Cursor::new(FILE), &mut server)?;
+        io::copy(&mut Cursor::new(FILE), &mut server.writer())?;
 
         {
             let mut good = Good(&mut server);
@@ -129,7 +130,7 @@ fn stream_good() -> io::Result<()> {
         }
 
         let mut buf = String::new();
-        server.read_to_string(&mut buf)?;
+        server.reader().read_to_string(&mut buf)?;
         assert_eq!(buf, "Hello World!");
 
         Ok(()) as io::Result<()>
@@ -176,29 +177,36 @@ fn stream_eof() -> io::Result<()> {
     })
 }
 
-fn make_pair() -> (ServerSession, ClientSession) {
+fn make_pair() -> (ServerConnection, ClientConnection) {
     const CERT: &str = include_str!("../../tests/end.cert");
     const CHAIN: &str = include_str!("../../tests/end.chain");
     const RSA: &str = include_str!("../../tests/end.rsa");
 
-    let cert = certs(&mut BufReader::new(Cursor::new(CERT))).unwrap();
+    let cert = certs(&mut BufReader::new(Cursor::new(CERT))).unwrap().into_iter().map(Certificate).collect();
     let mut keys = rsa_private_keys(&mut BufReader::new(Cursor::new(RSA))).unwrap();
-    let mut sconfig = ServerConfig::new(NoClientAuth::new());
-    sconfig.set_single_cert(cert, keys.pop().unwrap()).unwrap();
-    let server = ServerSession::new(&Arc::new(sconfig));
+    let sconfig = ServerConfig::builder().with_safe_defaults().with_client_cert_verifier(NoClientAuth::new())
+        .with_single_cert(cert, PrivateKey(keys.pop().unwrap())).unwrap();
+    let server = ServerConnection::new(Arc::new(sconfig)).unwrap();
 
-    let domain = DNSNameRef::try_from_ascii_str("localhost").unwrap();
-    let mut cconfig = ClientConfig::new();
+    let domain = ServerName::try_from("localhost").unwrap();
     let mut chain = BufReader::new(Cursor::new(CHAIN));
-    cconfig.root_store.add_pem_file(&mut chain).unwrap();
-    let client = ClientSession::new(&Arc::new(cconfig), domain);
+    let mut store = RootCertStore::empty();
+
+    for cert in rustls_pemfile::certs(&mut chain).into_iter().flatten() {
+        store.add(&Certificate(cert)).unwrap();
+    }
+
+    let cconfig = ClientConfig::builder().with_safe_defaults()
+        .with_root_certificates(store)
+        .with_no_client_auth();
+    let client = ClientConnection::new(Arc::new(cconfig), domain).unwrap();
 
     (server, client)
 }
 
 fn do_handshake(
-    client: &mut ClientSession,
-    server: &mut ServerSession,
+    client: &mut ClientConnection,
+    server: &mut ServerConnection,
     cx: &mut Context<'_>,
 ) -> Poll<io::Result<()>> {
     let mut good = Good(server);

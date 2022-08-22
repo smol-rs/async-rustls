@@ -1,6 +1,6 @@
 use crate::common::{Stream, TlsState};
 use futures_lite::io::{AsyncRead, AsyncWrite};
-use rustls::Session;
+use rustls::ConnectionCommon;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -11,7 +11,7 @@ pub(crate) trait IoSession {
     type Session;
 
     fn skip_handshake(&self) -> bool;
-    fn get_mut(&mut self) -> (&mut TlsState, &mut Self::Io, &mut Self::Session);
+    fn get_mut(&mut self) -> (&mut TlsState, &mut Self::Io, &mut ConnectionCommon<Self::Session>);
     fn into_io(self) -> Self::Io;
 }
 
@@ -24,7 +24,6 @@ impl<IS> Future for MidHandshake<IS>
 where
     IS: IoSession + Unpin,
     IS::Io: AsyncRead + AsyncWrite + Unpin,
-    IS::Session: Session + Unpin,
 {
     type Output = Result<IS, (io::Error, IS::Io)>;
 
@@ -39,8 +38,8 @@ where
             };
 
         if !stream.skip_handshake() {
-            let (state, io, session) = stream.get_mut();
-            let mut tls_stream = Stream::new(io, session).set_eof(!state.readable());
+            let (state, io, mut session) = stream.get_mut();
+            let mut tls_stream = Stream::new(io, &mut session).set_eof(!state.readable());
 
             macro_rules! try_poll {
                 ( $e:expr ) => {
