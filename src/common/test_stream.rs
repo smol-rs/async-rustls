@@ -193,8 +193,7 @@ fn make_pair() -> (ServerConnection, ClientConnection) {
         .into_iter()
         .map(Certificate)
         .collect();
-    let mut reader = BufReader::new(Cursor::new(RSA));
-    let mut keys = rustls_pemfile::read_all(&mut reader)
+    let mut keys = rustls_pemfile::read_all(&mut Cursor::new(RSA))
         .unwrap()
         .into_iter()
         .filter_map(|res| match res {
@@ -209,7 +208,7 @@ fn make_pair() -> (ServerConnection, ClientConnection) {
         .unwrap();
     let server = ServerConnection::new(Arc::new(sconfig)).unwrap();
 
-    let domain = ServerName::try_from("localhost").unwrap();
+    let domain = ServerName::try_from("foobar.com").unwrap();
     let mut chain = BufReader::new(Cursor::new(CHAIN));
     let mut store = RootCertStore::empty();
 
