@@ -1,5 +1,5 @@
 use async_rustls::{client::TlsStream, TlsConnector};
-use rustls::{ClientConfig, ServerName, RootCertStore, OwnedTrustAnchor};
+use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName};
 use smol::net::TcpStream;
 use smol::prelude::*;
 use std::convert::TryFrom;
@@ -16,7 +16,7 @@ async fn get(
     let input = format!("GET / HTTP/1.0\r\nHost: {}\r\n\r\n", domain);
 
     let addr = (domain, port).to_socket_addrs()?.next().unwrap();
-    let domain = ServerName::try_from(domain).unwrap(); 
+    let domain = ServerName::try_from(domain).unwrap();
     let mut buf = Vec::new();
 
     let stream = TcpStream::connect(&addr).await?;
@@ -79,9 +79,9 @@ fn test_modern() -> io::Result<()> {
 fn all_roots() -> impl Iterator<Item = OwnedTrustAnchor> {
     webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|root| {
         OwnedTrustAnchor::from_subject_spki_name_constraints(
-            root.subject, 
-            root.spki, 
-            root.name_constraints
+            root.subject,
+            root.spki,
+            root.name_constraints,
         )
     })
 }

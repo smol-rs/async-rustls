@@ -3,17 +3,20 @@ use futures_lite::future::poll_fn;
 use futures_lite::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use futures_lite::ready;
 use rustls::server::NoClientAuth;
-use rustls_pemfile::{certs, rsa_private_keys};
-use rustls::{ClientConfig, ClientConnection, ServerConfig, ServerConnection, Certificate, PrivateKey, RootCertStore, ServerName, ConnectionCommon};
+use rustls::{
+    Certificate, ClientConfig, ClientConnection, Connection, PrivateKey, RootCertStore,
+    ServerConfig, ServerConnection, ServerName,
+};
+use rustls_pemfile::{certs, Item};
 use std::convert::TryFrom;
 use std::io::{self, BufReader, Cursor, Read, Write};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-struct Good<'a, IO>(&'a mut ConnectionCommon<IO>);
+struct Good<'a>(&'a mut Connection);
 
-impl<'a, IO> AsyncRead for Good<'a, IO> {
+impl<'a> AsyncRead for Good<'a> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
@@ -23,7 +26,7 @@ impl<'a, IO> AsyncRead for Good<'a, IO> {
     }
 }
 
-impl<'a, IO> AsyncWrite for Good<'a, IO> {
+impl<'a> AsyncWrite for Good<'a> {
     fn poll_write(
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
@@ -114,7 +117,8 @@ fn stream_good() -> io::Result<()> {
     smol::block_on(async {
         const FILE: &[u8] = include_bytes!("../../Cargo.toml");
 
-        let (mut server, mut client) = make_pair();
+        let (server, mut client) = make_pair();
+        let mut server = Connection::from(server);
         poll_fn(|cx| do_handshake(&mut client, &mut server, cx)).await?;
         io::copy(&mut Cursor::new(FILE), &mut server.writer())?;
 
@@ -140,8 +144,9 @@ fn stream_good() -> io::Result<()> {
 #[test]
 fn stream_handshake() -> io::Result<()> {
     smol::block_on(async {
-        let (mut server, mut client) = make_pair();
+        let (server, mut client) = make_pair();
 
+        let mut server = Connection::from(server);
         {
             let mut good = Good(&mut server);
             let mut stream = Stream::new(&mut good, &mut client);
@@ -163,7 +168,8 @@ fn stream_handshake() -> io::Result<()> {
 #[test]
 fn stream_eof() -> io::Result<()> {
     smol::block_on(async {
-        let (mut server, mut client) = make_pair();
+        let (server, mut client) = make_pair();
+        let mut server = Connection::from(server);
         poll_fn(|cx| do_handshake(&mut client, &mut server, cx)).await?;
 
         let mut good = Good(&mut server);
@@ -182,10 +188,25 @@ fn make_pair() -> (ServerConnection, ClientConnection) {
     const CHAIN: &str = include_str!("../../tests/end.chain");
     const RSA: &str = include_str!("../../tests/end.rsa");
 
-    let cert = certs(&mut BufReader::new(Cursor::new(CERT))).unwrap().into_iter().map(Certificate).collect();
-    let mut keys = rsa_private_keys(&mut BufReader::new(Cursor::new(RSA))).unwrap();
-    let sconfig = ServerConfig::builder().with_safe_defaults().with_client_cert_verifier(NoClientAuth::new())
-        .with_single_cert(cert, PrivateKey(keys.pop().unwrap())).unwrap();
+    let cert = certs(&mut Cursor::new(CERT))
+        .unwrap()
+        .into_iter()
+        .map(Certificate)
+        .collect();
+    let mut reader = BufReader::new(Cursor::new(RSA));
+    let mut keys = rustls_pemfile::read_all(&mut reader)
+        .unwrap()
+        .into_iter()
+        .filter_map(|res| match res {
+            Item::RSAKey(v) | Item::ECKey(v) | Item::PKCS8Key(v) => Some(v),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let sconfig = ServerConfig::builder()
+        .with_safe_defaults()
+        .with_client_cert_verifier(NoClientAuth::new())
+        .with_single_cert(cert, PrivateKey(keys.pop().unwrap()))
+        .unwrap();
     let server = ServerConnection::new(Arc::new(sconfig)).unwrap();
 
     let domain = ServerName::try_from("localhost").unwrap();
@@ -196,7 +217,8 @@ fn make_pair() -> (ServerConnection, ClientConnection) {
         store.add(&Certificate(cert)).unwrap();
     }
 
-    let cconfig = ClientConfig::builder().with_safe_defaults()
+    let cconfig = ClientConfig::builder()
+        .with_safe_defaults()
         .with_root_certificates(store)
         .with_no_client_auth();
     let client = ClientConnection::new(Arc::new(cconfig), domain).unwrap();
@@ -206,7 +228,7 @@ fn make_pair() -> (ServerConnection, ClientConnection) {
 
 fn do_handshake(
     client: &mut ClientConnection,
-    server: &mut ServerConnection,
+    server: &mut Connection,
     cx: &mut Context<'_>,
 ) -> Poll<io::Result<()>> {
     let mut good = Good(server);

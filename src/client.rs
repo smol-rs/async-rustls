@@ -1,8 +1,14 @@
 use super::*;
 use crate::common::IoSession;
 use futures_lite::ready;
-use rustls::{ClientConnection, client::ClientConnectionData, ConnectionCommon};
+use rustls::ClientConnection;
 use std::io::Write;
+use std::task::Waker;
+
+#[cfg(unix)]
+use std::os::unix::io::{AsRawFd, RawFd};
+#[cfg(windows)]
+use std::os::windows::io::{AsRawSocket, RawSocket};
 
 /// A wrapper around an underlying raw stream which implements the TLS or SSL
 /// protocol.
@@ -11,6 +17,7 @@ pub struct TlsStream<IO> {
     pub(crate) io: IO,
     pub(crate) session: ClientConnection,
     pub(crate) state: TlsState,
+    pub(crate) early_waker: Option<Waker>,
 }
 
 impl<IO> TlsStream<IO> {
@@ -30,9 +37,29 @@ impl<IO> TlsStream<IO> {
     }
 }
 
+#[cfg(unix)]
+impl<S> AsRawFd for TlsStream<S>
+where
+    S: AsRawFd,
+{
+    fn as_raw_fd(&self) -> RawFd {
+        self.get_ref().0.as_raw_fd()
+    }
+}
+
+#[cfg(windows)]
+impl<S> AsRawSocket for TlsStream<S>
+where
+    S: AsRawSocket,
+{
+    fn as_raw_socket(&self) -> RawSocket {
+        self.get_ref().0.as_raw_socket()
+    }
+}
+
 impl<IO> IoSession for TlsStream<IO> {
     type Io = IO;
-    type Session = ClientConnectionData;
+    type Session = ClientConnection;
 
     #[inline]
     fn skip_handshake(&self) -> bool {
@@ -40,7 +67,7 @@ impl<IO> IoSession for TlsStream<IO> {
     }
 
     #[inline]
-    fn get_mut(&mut self) -> (&mut TlsState, &mut Self::Io, &mut ConnectionCommon<Self::Session>) {
+    fn get_mut(&mut self) -> (&mut TlsState, &mut Self::Io, &mut Self::Session) {
         (&mut self.state, &mut self.io, &mut self.session)
     }
 
@@ -60,18 +87,33 @@ where
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
         match self.state {
-            TlsState::EarlyData(..) => Poll::Pending,
+            TlsState::EarlyData(..) => {
+                let this = self.get_mut();
+
+                if this
+                    .early_waker
+                    .as_ref()
+                    .filter(|waker| cx.waker().will_wake(waker))
+                    .is_none()
+                {
+                    this.early_waker = Some(cx.waker().clone());
+                }
+
+                Poll::Pending
+            }
             TlsState::Stream | TlsState::WriteShutdown => {
                 let this = self.get_mut();
                 let mut stream =
                     Stream::new(&mut this.io, &mut this.session).set_eof(!this.state.readable());
 
                 match stream.as_mut_pin().poll_read(cx, buf) {
-                    Poll::Ready(Ok(0)) => {
-                        this.state.shutdown_read();
-                        Poll::Ready(Ok(0))
+                    Poll::Ready(Ok(n)) => {
+                        if n == 0 || stream.eof {
+                            this.state.shutdown_read();
+                        }
+
+                        Poll::Ready(Ok(n))
                     }
-                    Poll::Ready(Ok(n)) => Poll::Ready(Ok(n)),
                     Poll::Ready(Err(ref e)) if e.kind() == io::ErrorKind::ConnectionAborted => {
                         this.state.shutdown_read();
                         Poll::Ready(Ok(0))
@@ -132,6 +174,11 @@ where
 
                 // end
                 this.state = TlsState::Stream;
+
+                if let Some(waker) = this.early_waker.take() {
+                    waker.wake();
+                }
+
                 stream.as_mut_pin().poll_write(cx, buf)
             }
             _ => stream.as_mut_pin().poll_write(cx, buf),
@@ -158,6 +205,10 @@ where
             }
 
             this.state = TlsState::Stream;
+
+            if let Some(waker) = this.early_waker.take() {
+                waker.wake();
+            }
         }
 
         stream.as_mut_pin().poll_flush(cx)
@@ -171,7 +222,12 @@ where
 
         // we skip the handshake
         if let TlsState::EarlyData(..) = self.state {
-            return Pin::new(&mut self.io).poll_close(cx);
+            ready!(self.as_mut().poll_flush(cx))?;
+        }
+
+        if self.state.writeable() {
+            self.session.send_close_notify();
+            self.state.shutdown_write();
         }
 
         let this = self.get_mut();

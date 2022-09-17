@@ -8,7 +8,9 @@ pub mod server;
 
 use common::{MidHandshake, Stream, TlsState};
 use futures_lite::io::{AsyncRead, AsyncWrite};
-use rustls::{ClientConfig, ClientConnection, ServerConfig, ServerConnection, CommonState, ServerName};
+use rustls::{
+    ClientConfig, ClientConnection, CommonState, ServerConfig, ServerConnection, ServerName,
+};
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
@@ -80,6 +82,7 @@ impl TlsConnector {
                 TlsState::Stream
             },
             session,
+            early_waker: None,
         }))
     }
 }
@@ -98,7 +101,15 @@ impl TlsAcceptor {
         IO: AsyncRead + AsyncWrite + Unpin,
         F: FnOnce(&mut ServerConnection),
     {
-        let mut session = ServerConnection::new(self.inner.clone()).unwrap();
+        let mut session = match ServerConnection::new(self.inner.clone()) {
+            Ok(session) => session,
+            Err(error) => {
+                return Accept(MidHandshake::Error {
+                    io: stream,
+                    error: io::Error::new(io::ErrorKind::Other, error),
+                })
+            }
+        };
         f(&mut session);
 
         Accept(MidHandshake::Handshaking(server::TlsStream {

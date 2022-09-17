@@ -1,7 +1,7 @@
 use async_rustls::{TlsAcceptor, TlsConnector};
 use lazy_static::lazy_static;
+use rustls::{Certificate, ClientConfig, PrivateKey, RootCertStore, ServerConfig, ServerName};
 use rustls_pemfile::{certs, rsa_private_keys};
-use rustls::{ClientConfig, ServerConfig, Certificate, PrivateKey, ServerName, RootCertStore};
 use smol::io::{copy, split};
 use smol::net::{TcpListener, TcpStream};
 use smol::prelude::*;
@@ -18,10 +18,15 @@ const RSA: &str = include_str!("end.rsa");
 
 lazy_static! {
     static ref TEST_SERVER: (SocketAddr, &'static str, &'static str) = {
-        let cert = certs(&mut BufReader::new(Cursor::new(CERT))).unwrap().into_iter().map(Certificate).collect();
+        let cert = certs(&mut BufReader::new(Cursor::new(CERT)))
+            .unwrap()
+            .into_iter()
+            .map(Certificate)
+            .collect();
         let mut keys = rsa_private_keys(&mut BufReader::new(Cursor::new(RSA))).unwrap();
 
-        let config = ServerConfig::builder().with_safe_defaults()
+        let config = ServerConfig::builder()
+            .with_safe_defaults()
             .with_no_client_auth()
             .with_single_cert(cert, PrivateKey(keys.pop().unwrap()))
             .unwrap();

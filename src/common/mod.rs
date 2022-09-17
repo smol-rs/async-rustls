@@ -2,9 +2,9 @@ mod handshake;
 
 use futures_lite::io::{AsyncRead, AsyncWrite};
 pub(crate) use handshake::{IoSession, MidHandshake};
-use rustls::ConnectionCommon;
+use rustls::{ConnectionCommon, SideData};
 use std::io::{self, Read, Write};
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -56,7 +56,13 @@ pub struct Stream<'a, IO, S> {
     pub eof: bool,
 }
 
-impl<'a, IO: AsyncRead + AsyncWrite + Unpin, StateIo, S: DerefMut<Target = ConnectionCommon<StateIo>>> Stream<'a, IO, S> {
+impl<
+        'a,
+        IO: AsyncRead + AsyncWrite + Unpin,
+        S: DerefMut + Deref<Target = ConnectionCommon<SD>>,
+        SD: SideData,
+    > Stream<'a, IO, S>
+{
     pub fn new(io: &'a mut IO, session: &'a mut S) -> Self {
         Stream {
             io,
@@ -100,7 +106,7 @@ impl<'a, IO: AsyncRead + AsyncWrite + Unpin, StateIo, S: DerefMut<Target = Conne
             Err(err) => return Poll::Ready(Err(err)),
         };
 
-        self.session.process_new_packets().map_err(|err| {
+        let stats = self.session.process_new_packets().map_err(|err| {
             // In case we have an alert to send describing this error,
             // try a last-gasp write -- but don't predate the primary
             // error.
@@ -108,6 +114,13 @@ impl<'a, IO: AsyncRead + AsyncWrite + Unpin, StateIo, S: DerefMut<Target = Conne
 
             io::Error::new(io::ErrorKind::InvalidData, err)
         })?;
+
+        if stats.peer_has_closed() && self.session.is_handshaking() {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "TLS connection closed during handshake",
+            )));
+        }
 
         Poll::Ready(Ok(n))
     }
@@ -150,13 +163,27 @@ impl<'a, IO: AsyncRead + AsyncWrite + Unpin, StateIo, S: DerefMut<Target = Conne
         loop {
             let mut write_would_block = false;
             let mut read_would_block = false;
+            let mut need_flush = false;
 
             while self.session.wants_write() {
                 match self.write_io(cx) {
-                    Poll::Ready(Ok(n)) => wrlen += n,
+                    Poll::Ready(Ok(n)) => {
+                        wrlen += n;
+                        need_flush = true;
+                    }
                     Poll::Pending => {
                         write_would_block = true;
                         break;
+                    }
+                    Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+                }
+            }
+
+            if need_flush {
+                match Pin::new(&mut self.io).poll_flush(cx) {
+                    Poll::Ready(Ok(())) => (),
+                    Poll::Pending => {
+                        write_would_block = true;
                     }
                     Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
                 }
@@ -193,53 +220,72 @@ impl<'a, IO: AsyncRead + AsyncWrite + Unpin, StateIo, S: DerefMut<Target = Conne
     }
 }
 
-impl<'a, IO: AsyncRead + AsyncWrite + Unpin, StateIo, S: DerefMut<Target = ConnectionCommon<StateIo>>> AsyncRead for Stream<'a, IO, S> {
+impl<
+        'a,
+        IO: AsyncRead + AsyncWrite + Unpin,
+        SD: SideData,
+        S: DerefMut + Deref<Target = ConnectionCommon<SD>>,
+    > AsyncRead for Stream<'a, IO, S>
+{
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        let mut pos = 0;
+        let mut io_pending = false;
 
-        while pos != buf.len() {
-            let mut would_block = false;
-
-            // read a packet
-            while self.session.wants_read() {
-                match self.read_io(cx) {
-                    Poll::Ready(Ok(0)) => {
-                        self.eof = true;
-                        break;
-                    }
-                    Poll::Ready(Ok(_)) => (),
-                    Poll::Pending => {
-                        would_block = true;
-                        break;
-                    }
-                    Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+        // read a packet
+        while !self.eof && self.session.wants_read() {
+            match self.read_io(cx) {
+                Poll::Ready(Ok(0)) => {
+                    break;
                 }
+                Poll::Ready(Ok(_)) => (),
+                Poll::Pending => {
+                    io_pending = true;
+                    break;
+                }
+                Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
             }
-
-            return match self.session.reader().read(&mut buf[pos..]) {
-                Ok(0) if pos == 0 && would_block => Poll::Pending,
-                Ok(n) if self.eof || would_block => Poll::Ready(Ok(pos + n)),
-                Ok(n) => {
-                    pos += n;
-                    continue;
-                }
-                Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => Poll::Pending,
-                Err(ref err) if err.kind() == io::ErrorKind::ConnectionAborted && pos != 0 => {
-                    Poll::Ready(Ok(pos))
-                }
-                Err(err) => Poll::Ready(Err(err)),
-            };
         }
 
-        Poll::Ready(Ok(pos))
+        match self.session.reader().read(buf) {
+            // If Rustls returns `Ok(0)` (while `buf` is non-empty), the peer closed the
+            // connection with a `CloseNotify` message and no more data will be forthcoming.
+            //
+            // Rustls yielded more data: advance the buffer, then see if more data is coming.
+            //
+            // We don't need to modify `self.eof` here, because it is only a temporary mark.
+            // rustls will only return 0 if is has received `CloseNotify`,
+            // in which case no additional processing is required.
+            Ok(n) => Poll::Ready(Ok(n)),
+
+            // Rustls doesn't have more data to yield, but it believes the connection is open.
+            Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {
+                if !io_pending {
+                    // If `wants_read()` is satisfied, rustls will not return `WouldBlock`.
+                    // but if it does, we can try again.
+                    //
+                    // If the rustls state is abnormal, it may cause a cyclic wakeup.
+                    // but tokio's cooperative budget will prevent infinite wakeup.
+                    cx.waker().wake_by_ref();
+                }
+
+                Poll::Pending
+            }
+
+            Err(err) => Poll::Ready(Err(err)),
+        }
     }
 }
 
-impl<'a, IO: AsyncRead + AsyncWrite + Unpin, StateIo, S: DerefMut<Target = ConnectionCommon<StateIo>>> AsyncWrite for Stream<'a, IO, S> {
+impl<
+        'a,
+        IO: AsyncRead + AsyncWrite + Unpin,
+        SD: SideData,
+        S: DerefMut + Deref<Target = ConnectionCommon<SD>>,
+    > AsyncWrite for Stream<'a, IO, S>
+{
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
