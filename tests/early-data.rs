@@ -1,7 +1,6 @@
 #![cfg(feature = "early-data")]
 
 use async_rustls::{client::TlsStream, TlsConnector};
-use smol::{future, future::Future};
 use rustls::Certificate;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
@@ -9,6 +8,7 @@ use rustls::ServerName;
 use smol::net::TcpStream;
 use smol::prelude::*;
 use smol::Timer;
+use smol::{future, future::Future};
 use std::convert::TryFrom;
 use std::io::{self, BufRead, BufReader, Cursor};
 use std::net::SocketAddr;

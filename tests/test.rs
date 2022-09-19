@@ -103,16 +103,14 @@ fn pass() -> io::Result<()> {
         smol::Timer::after(Duration::from_secs(1)).await;
 
         let chain = certs(&mut std::io::Cursor::new(*chain)).unwrap();
-        let trust_anchors = chain
-            .iter()
-            .map(|cert| {
-                let ta = webpki::TrustAnchor::try_from_cert_der(&cert[..]).unwrap();
-                OwnedTrustAnchor::from_subject_spki_name_constraints(
-                    ta.subject,
-                    ta.spki,
-                    ta.name_constraints,
-                )
-            });
+        let trust_anchors = chain.iter().map(|cert| {
+            let ta = webpki::TrustAnchor::try_from_cert_der(&cert[..]).unwrap();
+            OwnedTrustAnchor::from_subject_spki_name_constraints(
+                ta.subject,
+                ta.spki,
+                ta.name_constraints,
+            )
+        });
         let mut root_store = rustls::RootCertStore::empty();
         root_store.add_server_trust_anchors(trust_anchors.into_iter());
         let config = rustls::ClientConfig::builder()
@@ -133,16 +131,14 @@ fn fail() -> io::Result<()> {
         let (addr, domain, chain) = start_server();
 
         let chain = certs(&mut std::io::Cursor::new(*chain)).unwrap();
-        let trust_anchors = chain
-            .iter()
-            .map(|cert| {
-                let ta = webpki::TrustAnchor::try_from_cert_der(&cert[..]).unwrap();
-                OwnedTrustAnchor::from_subject_spki_name_constraints(
-                    ta.subject,
-                    ta.spki,
-                    ta.name_constraints,
-                )
-            });
+        let trust_anchors = chain.iter().map(|cert| {
+            let ta = webpki::TrustAnchor::try_from_cert_der(&cert[..]).unwrap();
+            OwnedTrustAnchor::from_subject_spki_name_constraints(
+                ta.subject,
+                ta.spki,
+                ta.name_constraints,
+            )
+        });
         let mut root_store = rustls::RootCertStore::empty();
         root_store.add_server_trust_anchors(trust_anchors.into_iter());
         let config = rustls::ClientConfig::builder()
