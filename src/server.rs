@@ -1,11 +1,10 @@
-use super::*;
-use crate::common::IoSession;
-use rustls::ServerConnection;
-
 #[cfg(unix)]
 use std::os::unix::io::{AsRawFd, RawFd};
 #[cfg(windows)]
 use std::os::windows::io::{AsRawSocket, RawSocket};
+
+use super::*;
+use crate::common::IoSession;
 
 /// A wrapper around an underlying raw stream which implements the TLS or SSL
 /// protocol.
@@ -30,26 +29,6 @@ impl<IO> TlsStream<IO> {
     #[inline]
     pub fn into_inner(self) -> (IO, ServerConnection) {
         (self.io, self.session)
-    }
-}
-
-#[cfg(unix)]
-impl<S> AsRawFd for TlsStream<S>
-where
-    S: AsRawFd,
-{
-    fn as_raw_fd(&self) -> RawFd {
-        self.get_ref().0.as_raw_fd()
-    }
-}
-
-#[cfg(windows)]
-impl<S> AsRawSocket for TlsStream<S>
-where
-    S: AsRawSocket,
-{
-    fn as_raw_socket(&self) -> RawSocket {
-        self.get_ref().0.as_raw_socket()
     }
 }
 
@@ -89,20 +68,22 @@ where
         match &this.state {
             TlsState::Stream | TlsState::WriteShutdown => {
                 match stream.as_mut_pin().poll_read(cx, buf) {
-                    Poll::Ready(Ok(0)) => {
-                        this.state.shutdown_read();
-                        Poll::Ready(Ok(0))
+                    Poll::Ready(Ok(n)) => {
+                        if n == 0 || stream.eof {
+                            this.state.shutdown_read();
+                        }
+
+                        Poll::Ready(Ok(n))
                     }
-                    Poll::Ready(Ok(n)) => Poll::Ready(Ok(n)),
-                    Poll::Ready(Err(ref err)) if err.kind() == io::ErrorKind::ConnectionAborted => {
+                    Poll::Ready(Err(err)) if err.kind() == io::ErrorKind::UnexpectedEof => {
                         this.state.shutdown_read();
-                        Poll::Ready(Ok(0))
+                        Poll::Ready(Err(err))
                     }
-                    Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-                    Poll::Pending => Poll::Pending,
+                    output => output,
                 }
             }
             TlsState::ReadShutdown | TlsState::FullyShutdown => Poll::Ready(Ok(0)),
+            #[cfg(feature = "early-data")]
             s => unreachable!("server TLS can not hit this state: {:?}", s),
         }
     }
@@ -142,5 +123,25 @@ where
         let mut stream =
             Stream::new(&mut this.io, &mut this.session).set_eof(!this.state.readable());
         stream.as_mut_pin().poll_close(cx)
+    }
+}
+
+#[cfg(unix)]
+impl<IO> AsRawFd for TlsStream<IO>
+where
+    IO: AsRawFd,
+{
+    fn as_raw_fd(&self) -> RawFd {
+        self.get_ref().0.as_raw_fd()
+    }
+}
+
+#[cfg(windows)]
+impl<IO> AsRawSocket for TlsStream<IO>
+where
+    IO: AsRawSocket,
+{
+    fn as_raw_socket(&self) -> RawSocket {
+        self.get_ref().0.as_raw_socket()
     }
 }

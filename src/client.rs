@@ -1,10 +1,5 @@
 use super::*;
 use crate::common::IoSession;
-use futures_lite::ready;
-use rustls::ClientConnection;
-use std::io::Write;
-use std::task::Waker;
-
 #[cfg(unix)]
 use std::os::unix::io::{AsRawFd, RawFd};
 #[cfg(windows)]
@@ -17,7 +12,9 @@ pub struct TlsStream<IO> {
     pub(crate) io: IO,
     pub(crate) session: ClientConnection,
     pub(crate) state: TlsState,
-    pub(crate) early_waker: Option<Waker>,
+
+    #[cfg(feature = "early-data")]
+    pub(crate) early_waker: Option<std::task::Waker>,
 }
 
 impl<IO> TlsStream<IO> {
@@ -87,9 +84,16 @@ where
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
         match self.state {
+            #[cfg(feature = "early-data")]
             TlsState::EarlyData(..) => {
                 let this = self.get_mut();
 
+                // In the EarlyData state, we have not really established a Tls connection.
+                // Before writing data through `AsyncWrite` and completing the tls handshake,
+                // we ignore read readiness and return to pending.
+                //
+                // In order to avoid event loss,
+                // we need to register a waker and wake it up after tls is connected.
                 if this
                     .early_waker
                     .as_ref()
@@ -114,9 +118,9 @@ where
 
                         Poll::Ready(Ok(n))
                     }
-                    Poll::Ready(Err(ref e)) if e.kind() == io::ErrorKind::ConnectionAborted => {
+                    Poll::Ready(Err(err)) if err.kind() == io::ErrorKind::ConnectionAborted => {
                         this.state.shutdown_read();
-                        Poll::Ready(Ok(0))
+                        Poll::Ready(Err(err))
                     }
                     output => output,
                 }
@@ -143,14 +147,14 @@ where
 
         #[allow(clippy::match_single_binding)]
         match this.state {
+            #[cfg(feature = "early-data")]
             TlsState::EarlyData(ref mut pos, ref mut data) => {
+                use std::io::Write;
+
                 // write early data
                 if let Some(mut early_data) = stream.session.early_data() {
                     let len = match early_data.write(buf) {
                         Ok(n) => n,
-                        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {
-                            return Poll::Pending
-                        }
                         Err(err) => return Poll::Ready(Err(err)),
                     };
                     if len != 0 {
@@ -190,24 +194,27 @@ where
         let mut stream =
             Stream::new(&mut this.io, &mut this.session).set_eof(!this.state.readable());
 
-        if let TlsState::EarlyData(ref mut pos, ref mut data) = this.state {
-            // complete handshake
-            while stream.session.is_handshaking() {
-                ready!(stream.handshake(cx))?;
-            }
-
-            // write early data (fallback)
-            if !stream.session.is_early_data_accepted() {
-                while *pos < data.len() {
-                    let len = ready!(stream.as_mut_pin().poll_write(cx, &data[*pos..]))?;
-                    *pos += len;
+        #[cfg(feature = "early-data")]
+        {
+            if let TlsState::EarlyData(ref mut pos, ref mut data) = this.state {
+                // complete handshake
+                while stream.session.is_handshaking() {
+                    ready!(stream.handshake(cx))?;
                 }
-            }
 
-            this.state = TlsState::Stream;
+                // write early data (fallback)
+                if !stream.session.is_early_data_accepted() {
+                    while *pos < data.len() {
+                        let len = ready!(stream.as_mut_pin().poll_write(cx, &data[*pos..]))?;
+                        *pos += len;
+                    }
+                }
 
-            if let Some(waker) = this.early_waker.take() {
-                waker.wake();
+                this.state = TlsState::Stream;
+
+                if let Some(waker) = this.early_waker.take() {
+                    waker.wake();
+                }
             }
         }
 
@@ -215,14 +222,12 @@ where
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        if self.state.writeable() {
-            self.session.send_close_notify();
-            self.state.shutdown_write();
-        }
-
-        // we skip the handshake
-        if let TlsState::EarlyData(..) = self.state {
-            ready!(self.as_mut().poll_flush(cx))?;
+        #[cfg(feature = "early-data")]
+        {
+            // complete handshake
+            if matches!(self.state, TlsState::EarlyData(..)) {
+                ready!(self.as_mut().poll_flush(cx))?;
+            }
         }
 
         if self.state.writeable() {

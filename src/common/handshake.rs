@@ -1,5 +1,5 @@
 use crate::common::{Stream, TlsState};
-use futures_lite::io::{AsyncRead, AsyncWrite};
+use futures_io::{AsyncRead, AsyncWrite};
 use rustls::{ConnectionCommon, SideData};
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
@@ -36,13 +36,14 @@ where
 
         let mut stream = match mem::replace(this, MidHandshake::End) {
             MidHandshake::Handshaking(stream) => stream,
+            // Starting the handshake returned an error; fail the future immediately.
             MidHandshake::Error { io, error } => return Poll::Ready(Err((error, io))),
             _ => panic!("unexpected polling after handshake"),
         };
 
         if !stream.skip_handshake() {
             let (state, io, session) = stream.get_mut();
-            let mut tls_stream = Stream::new(io, &mut *session).set_eof(!state.readable());
+            let mut tls_stream = Stream::new(io, session).set_eof(!state.readable());
 
             macro_rules! try_poll {
                 ( $e:expr ) => {

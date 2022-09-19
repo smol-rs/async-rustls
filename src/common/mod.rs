@@ -1,15 +1,16 @@
 mod handshake;
 
-use futures_lite::io::{AsyncRead, AsyncWrite};
+use futures_io::{AsyncRead, AsyncWrite};
 pub(crate) use handshake::{IoSession, MidHandshake};
 use rustls::{ConnectionCommon, SideData};
-use std::io::{self, Read, Write};
+use std::io::{self, IoSlice, Read, Write};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 #[derive(Debug)]
 pub enum TlsState {
+    #[cfg(feature = "early-data")]
     EarlyData(usize, Vec<u8>),
     Stream,
     ReadShutdown,
@@ -36,34 +37,39 @@ impl TlsState {
 
     #[inline]
     pub fn writeable(&self) -> bool {
-        !matches!(self, TlsState::WriteShutdown | TlsState::FullyShutdown)
+        !matches!(*self, TlsState::WriteShutdown | TlsState::FullyShutdown)
     }
 
     #[inline]
     pub fn readable(&self) -> bool {
-        !matches!(self, TlsState::ReadShutdown | TlsState::FullyShutdown)
+        !matches!(*self, TlsState::ReadShutdown | TlsState::FullyShutdown)
     }
 
     #[inline]
+    #[cfg(feature = "early-data")]
     pub fn is_early_data(&self) -> bool {
         matches!(self, TlsState::EarlyData(..))
     }
+
+    #[inline]
+    #[cfg(not(feature = "early-data"))]
+    pub const fn is_early_data(&self) -> bool {
+        false
+    }
 }
 
-pub struct Stream<'a, IO, S> {
+pub struct Stream<'a, IO, C> {
     pub io: &'a mut IO,
-    pub session: &'a mut S,
+    pub session: &'a mut C,
     pub eof: bool,
 }
 
-impl<
-        'a,
-        IO: AsyncRead + AsyncWrite + Unpin,
-        S: DerefMut + Deref<Target = ConnectionCommon<SD>>,
-        SD: SideData,
-    > Stream<'a, IO, S>
+impl<'a, IO: AsyncRead + AsyncWrite + Unpin, C, SD> Stream<'a, IO, C>
+where
+    C: DerefMut + Deref<Target = ConnectionCommon<SD>>,
+    SD: SideData,
 {
-    pub fn new(io: &'a mut IO, session: &'a mut S) -> Self {
+    pub fn new(io: &'a mut IO, session: &'a mut C) -> Self {
         Stream {
             io,
             session,
@@ -83,22 +89,7 @@ impl<
     }
 
     pub fn read_io(&mut self, cx: &mut Context) -> Poll<io::Result<usize>> {
-        struct Reader<'a, 'b, T> {
-            io: &'a mut T,
-            cx: &'a mut Context<'b>,
-        }
-
-        impl<'a, 'b, T: AsyncRead + Unpin> Read for Reader<'a, 'b, T> {
-            #[inline]
-            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-                match Pin::new(&mut self.io).poll_read(self.cx, buf) {
-                    Poll::Ready(result) => result,
-                    Poll::Pending => Err(io::ErrorKind::WouldBlock.into()),
-                }
-            }
-        }
-
-        let mut reader = Reader { io: self.io, cx };
+        let mut reader = SyncReadAdapter { io: self.io, cx };
 
         let n = match self.session.read_tls(&mut reader) {
             Ok(n) => n,
@@ -118,7 +109,7 @@ impl<
         if stats.peer_has_closed() && self.session.is_handshaking() {
             return Poll::Ready(Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
-                "TLS connection closed during handshake",
+                "tls handshake alert",
             )));
         }
 
@@ -131,20 +122,32 @@ impl<
             cx: &'a mut Context<'b>,
         }
 
-        impl<'a, 'b, T: AsyncWrite + Unpin> Write for Writer<'a, 'b, T> {
+        impl<'a, 'b, T: Unpin> Writer<'a, 'b, T> {
             #[inline]
-            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-                match Pin::new(&mut self.io).poll_write(self.cx, buf) {
+            fn poll_with<U>(
+                &mut self,
+                f: impl FnOnce(Pin<&mut T>, &mut Context<'_>) -> Poll<io::Result<U>>,
+            ) -> io::Result<U> {
+                match f(Pin::new(self.io), self.cx) {
                     Poll::Ready(result) => result,
                     Poll::Pending => Err(io::ErrorKind::WouldBlock.into()),
                 }
             }
+        }
+
+        impl<'a, 'b, T: AsyncWrite + Unpin> Write for Writer<'a, 'b, T> {
+            #[inline]
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.poll_with(|io, cx| io.poll_write(cx, buf))
+            }
+
+            #[inline]
+            fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
+                self.poll_with(|io, cx| io.poll_write_vectored(cx, bufs))
+            }
 
             fn flush(&mut self) -> io::Result<()> {
-                match Pin::new(&mut self.io).poll_flush(self.cx) {
-                    Poll::Ready(result) => result,
-                    Poll::Pending => Err(io::ErrorKind::WouldBlock.into()),
-                }
+                self.poll_with(|io, cx| io.poll_flush(cx))
             }
         }
 
@@ -182,10 +185,8 @@ impl<
             if need_flush {
                 match Pin::new(&mut self.io).poll_flush(cx) {
                     Poll::Ready(Ok(())) => (),
-                    Poll::Pending => {
-                        write_would_block = true;
-                    }
                     Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+                    Poll::Pending => write_would_block = true,
                 }
             }
 
@@ -220,16 +221,14 @@ impl<
     }
 }
 
-impl<
-        'a,
-        IO: AsyncRead + AsyncWrite + Unpin,
-        SD: SideData,
-        S: DerefMut + Deref<Target = ConnectionCommon<SD>>,
-    > AsyncRead for Stream<'a, IO, S>
+impl<'a, IO: AsyncRead + AsyncWrite + Unpin, C, SD> AsyncRead for Stream<'a, IO, C>
+where
+    C: DerefMut + Deref<Target = ConnectionCommon<SD>>,
+    SD: SideData,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
         let mut io_pending = false;
@@ -279,12 +278,10 @@ impl<
     }
 }
 
-impl<
-        'a,
-        IO: AsyncRead + AsyncWrite + Unpin,
-        SD: SideData,
-        S: DerefMut + Deref<Target = ConnectionCommon<SD>>,
-    > AsyncWrite for Stream<'a, IO, S>
+impl<'a, IO: AsyncRead + AsyncWrite + Unpin, C, SD> AsyncWrite for Stream<'a, IO, C>
+where
+    C: DerefMut + Deref<Target = ConnectionCommon<SD>>,
+    SD: SideData,
 {
     fn poll_write(
         mut self: Pin<&mut Self>,
@@ -298,7 +295,6 @@ impl<
 
             match self.session.writer().write(&buf[pos..]) {
                 Ok(n) => pos += n,
-                Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => (),
                 Err(err) => return Poll::Ready(Err(err)),
             };
 
@@ -326,16 +322,36 @@ impl<
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
         self.session.writer().flush()?;
         while self.session.wants_write() {
-            futures_lite::ready!(self.write_io(cx))?;
+            ready!(self.write_io(cx))?;
         }
         Pin::new(&mut self.io).poll_flush(cx)
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         while self.session.wants_write() {
-            futures_lite::ready!(self.write_io(cx))?;
+            ready!(self.write_io(cx))?;
         }
         Pin::new(&mut self.io).poll_close(cx)
+    }
+}
+
+/// An adapter that implements a [`Read`] interface for [`AsyncRead`] types and an
+/// associated [`Context`].
+///
+/// Turns `Poll::Pending` into `WouldBlock`.
+pub struct SyncReadAdapter<'a, 'b, T> {
+    pub io: &'a mut T,
+    pub cx: &'a mut Context<'b>,
+}
+
+impl<'a, 'b, T: AsyncRead + Unpin> Read for SyncReadAdapter<'a, 'b, T> {
+    #[inline]
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match Pin::new(&mut self.io).poll_read(self.cx, buf) {
+            Poll::Ready(Ok(n)) => Ok(n),
+            Poll::Ready(Err(err)) => Err(err),
+            Poll::Pending => Err(io::ErrorKind::WouldBlock.into()),
+        }
     }
 }
 

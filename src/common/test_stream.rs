@@ -1,17 +1,10 @@
 use super::Stream;
-use futures_lite::future::poll_fn;
-use futures_lite::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use futures_lite::ready;
-use rustls::server::NoClientAuth;
-use rustls::{
-    Certificate, ClientConfig, ClientConnection, Connection, PrivateKey, RootCertStore,
-    ServerConfig, ServerConnection, ServerName,
-};
-use rustls_pemfile::{certs, Item};
-use std::convert::TryFrom;
-use std::io::{self, BufReader, Cursor, Read, Write};
+use futures_util::future::poll_fn;
+use futures_util::task::noop_waker_ref;
+use rustls::{ClientConnection, Connection, ServerConnection};
+use smol::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use std::io::{self, Cursor, Read, Write};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 struct Good<'a>(&'a mut Connection);
@@ -22,7 +15,10 @@ impl<'a> AsyncRead for Good<'a> {
         _cx: &mut Context<'_>,
         mut buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        Poll::Ready(self.0.write_tls(buf.by_ref()))
+        Poll::Ready(match self.0.write_tls(buf.by_ref()) {
+            Ok(n) => Ok(n),
+            Err(err) => Err(err),
+        })
     }
 }
 
@@ -46,9 +42,10 @@ impl<'a> AsyncWrite for Good<'a> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.0.send_close_notify();
-        Poll::Ready(Ok(()))
+        dbg!("sent close notify");
+        self.poll_flush(cx)
     }
 }
 
@@ -82,19 +79,22 @@ impl AsyncWrite for Pending {
     }
 }
 
-struct Eof;
+struct Expected(Cursor<Vec<u8>>);
 
-impl AsyncRead for Eof {
+impl AsyncRead for Expected {
     fn poll_read(
         self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
-        _: &mut [u8],
+        buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        Poll::Ready(Ok(0))
+        let this = self.get_mut();
+        let n = std::io::Read::read(&mut this.0, buf)?;
+
+        Poll::Ready(Ok(n))
     }
 }
 
-impl AsyncWrite for Eof {
+impl AsyncWrite for Expected {
     fn poll_write(
         self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
@@ -115,27 +115,62 @@ impl AsyncWrite for Eof {
 #[test]
 fn stream_good() -> io::Result<()> {
     smol::block_on(async {
-        const FILE: &[u8] = include_bytes!("../../Cargo.toml");
+        const FILE: &[u8] = include_bytes!("../../README.md");
 
         let (server, mut client) = make_pair();
         let mut server = Connection::from(server);
         poll_fn(|cx| do_handshake(&mut client, &mut server, cx)).await?;
+
         io::copy(&mut Cursor::new(FILE), &mut server.writer())?;
+        server.send_close_notify();
 
         {
             let mut good = Good(&mut server);
             let mut stream = Stream::new(&mut good, &mut client);
 
             let mut buf = Vec::new();
-            stream.read_to_end(&mut buf).await?;
+            dbg!(stream.read_to_end(&mut buf).await)?;
             assert_eq!(buf, FILE);
-            stream.write_all(b"Hello World!").await?;
-            stream.flush().await?;
+
+            dbg!(stream.write_all(b"Hello World!").await)?;
+            stream.session.send_close_notify();
+
+            dbg!(stream.close().await)?;
         }
 
         let mut buf = String::new();
-        server.reader().read_to_string(&mut buf)?;
+        dbg!(server.process_new_packets()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        dbg!(server.reader().read_to_string(&mut buf))?;
         assert_eq!(buf, "Hello World!");
+
+        Ok(()) as io::Result<()>
+    })
+}
+
+#[test]
+fn stream_bad() -> io::Result<()> {
+    smol::block_on(async {
+        let (server, mut client) = make_pair();
+        let mut server = Connection::from(server);
+        poll_fn(|cx| do_handshake(&mut client, &mut server, cx)).await?;
+        client.set_buffer_limit(Some(1024));
+
+        let mut bad = Pending;
+        let mut stream = Stream::new(&mut bad, &mut client);
+        assert_eq!(
+            poll_fn(|cx| stream.as_mut_pin().poll_write(cx, &[0x42; 8])).await?,
+            8
+        );
+        assert_eq!(
+            poll_fn(|cx| stream.as_mut_pin().poll_write(cx, &[0x42; 8])).await?,
+            8
+        );
+        let r = poll_fn(|cx| stream.as_mut_pin().poll_write(cx, &[0x00; 1024])).await?; // fill buffer
+        assert!(r < 1024);
+
+        let mut cx = Context::from_waker(noop_waker_ref());
+        let ret = stream.as_mut_pin().poll_write(&mut cx, &[0x01]);
+        assert!(ret.is_pending());
 
         Ok(()) as io::Result<()>
     })
@@ -145,8 +180,8 @@ fn stream_good() -> io::Result<()> {
 fn stream_handshake() -> io::Result<()> {
     smol::block_on(async {
         let (server, mut client) = make_pair();
-
         let mut server = Connection::from(server);
+
         {
             let mut good = Good(&mut server);
             let mut stream = Stream::new(&mut good, &mut client);
@@ -166,61 +201,73 @@ fn stream_handshake() -> io::Result<()> {
 }
 
 #[test]
+fn stream_handshake_eof() -> io::Result<()> {
+    smol::block_on(async {
+        let (_, mut client) = make_pair();
+
+        let mut bad = Expected(Cursor::new(Vec::new()));
+        let mut stream = Stream::new(&mut bad, &mut client);
+
+        let mut cx = Context::from_waker(noop_waker_ref());
+        let r = stream.handshake(&mut cx);
+        assert_eq!(
+            r.map_err(|err| err.kind()),
+            Poll::Ready(Err(io::ErrorKind::UnexpectedEof))
+        );
+
+        Ok(()) as io::Result<()>
+    })
+}
+
+// see https://github.com/tokio-rs/tls/issues/77
+#[test]
+fn stream_handshake_regression_issues_77() -> io::Result<()> {
+    smol::block_on(async {
+        let (_, mut client) = make_pair();
+
+        let mut bad = Expected(Cursor::new(b"\x15\x03\x01\x00\x02\x02\x00".to_vec()));
+        let mut stream = Stream::new(&mut bad, &mut client);
+
+        let mut cx = Context::from_waker(noop_waker_ref());
+        let r = stream.handshake(&mut cx);
+        assert_eq!(
+            r.map_err(|err| err.kind()),
+            Poll::Ready(Err(io::ErrorKind::UnexpectedEof))
+        );
+
+        Ok(()) as io::Result<()>
+    })
+}
+
+#[test]
 fn stream_eof() -> io::Result<()> {
     smol::block_on(async {
         let (server, mut client) = make_pair();
         let mut server = Connection::from(server);
         poll_fn(|cx| do_handshake(&mut client, &mut server, cx)).await?;
 
-        let mut good = Good(&mut server);
-        let mut stream = Stream::new(&mut good, &mut client).set_eof(true);
+        let mut bad = Expected(Cursor::new(Vec::new()));
+        let mut stream = Stream::new(&mut bad, &mut client);
 
         let mut buf = Vec::new();
-        stream.read_to_end(&mut buf).await?;
-        assert_eq!(buf.len(), 0);
+        let result = stream.read_to_end(&mut buf).await;
+        assert_eq!(
+            result.err().map(|e| e.kind()),
+            Some(io::ErrorKind::UnexpectedEof)
+        );
 
         Ok(()) as io::Result<()>
     })
 }
 
 fn make_pair() -> (ServerConnection, ClientConnection) {
-    const CERT: &str = include_str!("../../tests/end.cert");
-    const CHAIN: &str = include_str!("../../tests/end.chain");
-    const RSA: &str = include_str!("../../tests/end.rsa");
+    use std::convert::TryFrom;
 
-    let cert = certs(&mut Cursor::new(CERT))
-        .unwrap()
-        .into_iter()
-        .map(Certificate)
-        .collect();
-    let mut keys = rustls_pemfile::read_all(&mut Cursor::new(RSA))
-        .unwrap()
-        .into_iter()
-        .filter_map(|res| match res {
-            Item::RSAKey(v) | Item::ECKey(v) | Item::PKCS8Key(v) => Some(v),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let sconfig = ServerConfig::builder()
-        .with_safe_defaults()
-        .with_client_cert_verifier(NoClientAuth::new())
-        .with_single_cert(cert, PrivateKey(keys.pop().unwrap()))
-        .unwrap();
-    let server = ServerConnection::new(Arc::new(sconfig)).unwrap();
+    let (sconfig, cconfig) = utils::make_configs();
+    let server = ServerConnection::new(sconfig).unwrap();
 
-    let domain = ServerName::try_from("foobar.com").unwrap();
-    let mut chain = BufReader::new(Cursor::new(CHAIN));
-    let mut store = RootCertStore::empty();
-
-    for cert in rustls_pemfile::certs(&mut chain).into_iter().flatten() {
-        store.add(&Certificate(cert)).unwrap();
-    }
-
-    let cconfig = ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(store)
-        .with_no_client_auth();
-    let client = ClientConnection::new(Arc::new(cconfig), domain).unwrap();
+    let domain = rustls::ServerName::try_from("foobar.com").unwrap();
+    let client = ClientConnection::new(cconfig, domain).unwrap();
 
     (server, client)
 }
@@ -243,3 +290,6 @@ fn do_handshake(
 
     Poll::Ready(Ok(()))
 }
+
+// Share `utils` module with integration tests
+include!("../../tests/utils.rs");

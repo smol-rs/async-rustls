@@ -1,37 +1,32 @@
 [package]
 name = "async-rustls"
 version = "0.3.0"
-authors = [
-  "Alex Crichton <alex@alexcrichton.com>",
-  "quininer kel <quininer@live.com>",
-  "Stjepan Glavina <stjepang@gmail.com>",
-]
-edition = "2018"
-description = "Async TLS/SSL streams using rustls"
-license = "Apache-2.0 OR MIT"
+authors = ["John Nunley <jtnunley01@gmail.com>"]
+license = "MIT/Apache-2.0"
 repository = "https://github.com/smol-rs/async-rustls"
 homepage = "https://github.com/smol-rs/async-rustls"
-documentation = "https://docs.rs/async-rustls"
-keywords = ["rustls", "tls", "ssl", "synchronization"]
+documentation = "https://docs.rs/asyn--rustls"
+readme = "README.md"
+description = "Asynchronous TLS/SSL streams for Smol using Rustls."
 categories = ["asynchronous", "cryptography", "network-programming"]
-
-[features]
-default = ["logging"]
-logging = ["rustls/logging"]
-dangerous_configuration = ["rustls/dangerous_configuration"]
-quic = ["rustls/quic"]
+edition = "2018"
 
 [dependencies]
-futures-lite = "1.10.1"
-webpki = "0.21"
+futures-io = "0.3.24"
+rustls = { version = "0.20", default-features = false }
+webpki = "0.22"
 
-[dependencies.rustls]
-version = "0.20"
-default-features = false
+[features]
+default = ["logging", "tls12"]
+dangerous_configuration = ["rustls/dangerous_configuration"]
+early-data = []
+logging = ["rustls/logging"]
+tls12 = ["rustls/tls12"]
 
 [dev-dependencies]
+smol = "1.0"
+futures-util = "0.3.1"
 lazy_static = "1"
-rustls = { version = "0.20", default-features = false, features = ["tls12"] }
-rustls-pemfile = { version = "1.0.1", default-features = false }
-smol = "1.2.3"
-webpki-roots = "0.20"
+webpki-roots = "0.22"
+rustls-pemfile = "1"
+once_cell = "1.14.0"

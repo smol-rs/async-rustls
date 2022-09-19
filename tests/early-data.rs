@@ -1,5 +1,7 @@
+#![cfg(feature = "early-data")]
+
 use async_rustls::{client::TlsStream, TlsConnector};
-use futures_lite::{future, future::Future, ready};
+use smol::{future, future::Future};
 use rustls::Certificate;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
@@ -23,7 +25,7 @@ impl<T: AsyncRead + Unpin> Future for Read1<T> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut buf = [0];
-        ready!(Pin::new(&mut self.0).poll_read(cx, &mut buf))?;
+        smol::ready!(Pin::new(&mut self.0).poll_read(cx, &mut buf))?;
         Poll::Pending
     }
 }
@@ -40,7 +42,7 @@ async fn send(
 ) -> io::Result<TlsStream<TcpStream>> {
     let connector = TlsConnector::from(config).early_data(true);
     let stream = TcpStream::connect(&addr).await?;
-    let domain = ServerName::try_from("testserver.com").unwrap();
+    let domain = ServerName::try_from("foobar.com").unwrap();
 
     let mut stream = connector.connect(domain, stream).await?;
     stream.write_all(data).await?;
