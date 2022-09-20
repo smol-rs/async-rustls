@@ -1,13 +1,17 @@
 [package]
 name = "async-rustls"
 version = "0.3.0"
-authors = ["John Nunley <jtnunley01@gmail.com>"]
+authors = [
+  "Alex Crichton <alex@alexcrichton.com>",
+  "quininer kel <quininer@live.com>",
+  "John Nunley <jtnunley01@gmail.com>",
+]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/smol-rs/async-rustls"
 homepage = "https://github.com/smol-rs/async-rustls"
 documentation = "https://docs.rs/asyn--rustls"
 readme = "README.md"
-description = "Asynchronous TLS/SSL streams for Smol using Rustls."
+description = "Asynchronous TLS/SSL streams using Rustls."
 categories = ["asynchronous", "cryptography", "network-programming"]
 edition = "2018"
 
@@ -22,6 +26,7 @@ dangerous_configuration = ["rustls/dangerous_configuration"]
 early-data = []
 logging = ["rustls/logging"]
 tls12 = ["rustls/tls12"]
+quic = ["rustls/quic"]
 
 [dev-dependencies]
 smol = "1.0"
