@@ -1,7 +1,8 @@
 use crate::common::{Stream, TlsState};
-use futures_lite::io::{AsyncRead, AsyncWrite};
-use rustls::Session;
+use futures_io::{AsyncRead, AsyncWrite};
+use rustls::{ConnectionCommon, SideData};
 use std::future::Future;
+use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::{io, mem};
@@ -15,28 +16,30 @@ pub(crate) trait IoSession {
     fn into_io(self) -> Self::Io;
 }
 
-pub(crate) enum MidHandshake<IS> {
+pub(crate) enum MidHandshake<IS: IoSession> {
     Handshaking(IS),
     End,
+    Error { io: IS::Io, error: io::Error },
 }
 
-impl<IS> Future for MidHandshake<IS>
+impl<IS, SD> Future for MidHandshake<IS>
 where
     IS: IoSession + Unpin,
     IS::Io: AsyncRead + AsyncWrite + Unpin,
-    IS::Session: Session + Unpin,
+    IS::Session: DerefMut + Deref<Target = ConnectionCommon<SD>> + Unpin,
+    SD: SideData,
 {
     type Output = Result<IS, (io::Error, IS::Io)>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        let mut stream =
-            if let MidHandshake::Handshaking(stream) = mem::replace(this, MidHandshake::End) {
-                stream
-            } else {
-                panic!("unexpected polling after handshake")
-            };
+        let mut stream = match mem::replace(this, MidHandshake::End) {
+            MidHandshake::Handshaking(stream) => stream,
+            // Starting the handshake returned an error; fail the future immediately.
+            MidHandshake::Error { io, error } => return Poll::Ready(Err((error, io))),
+            _ => panic!("unexpected polling after handshake"),
+        };
 
         if !stream.skip_handshake() {
             let (state, io, session) = stream.get_mut();
@@ -59,9 +62,7 @@ where
                 try_poll!(tls_stream.handshake(cx));
             }
 
-            while tls_stream.session.wants_write() {
-                try_poll!(tls_stream.write_io(cx));
-            }
+            try_poll!(Pin::new(&mut tls_stream).poll_flush(cx));
         }
 
         Poll::Ready(Ok(stream))

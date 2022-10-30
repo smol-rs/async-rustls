@@ -1,80 +1,82 @@
-use async_rustls::{TlsAcceptor, TlsConnector};
-use lazy_static::lazy_static;
-use rustls::internal::pemfile::{certs, rsa_private_keys};
-use rustls::{ClientConfig, ServerConfig};
-use smol::io::{copy, split};
+use async_rustls::{LazyConfigAcceptor, TlsAcceptor, TlsConnector};
+use futures_util::future::TryFutureExt;
+use once_cell::sync::Lazy;
+use rustls::{ClientConfig, OwnedTrustAnchor};
+use rustls_pemfile::{certs, rsa_private_keys};
+use smol::io::{copy, split, AssertAsync, AsyncReadExt, AsyncWriteExt};
 use smol::net::{TcpListener, TcpStream};
 use smol::prelude::*;
-use std::io;
-use std::io::{BufReader, Cursor};
+use std::convert::TryFrom;
+use std::io::{BufReader, Cursor, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
+use std::time::Duration;
+use std::{io, thread};
 
 const CERT: &str = include_str!("end.cert");
-const CHAIN: &str = include_str!("end.chain");
+const CHAIN: &[u8] = include_bytes!("end.chain");
 const RSA: &str = include_str!("end.rsa");
 
-lazy_static! {
-    static ref TEST_SERVER: (SocketAddr, &'static str, &'static str) = {
-        let cert = certs(&mut BufReader::new(Cursor::new(CERT))).unwrap();
-        let mut keys = rsa_private_keys(&mut BufReader::new(Cursor::new(RSA))).unwrap();
+static TEST_SERVER: Lazy<(SocketAddr, &'static str, &'static [u8])> = Lazy::new(|| {
+    let cert = certs(&mut BufReader::new(Cursor::new(CERT)))
+        .unwrap()
+        .drain(..)
+        .map(rustls::Certificate)
+        .collect();
+    let mut keys = rsa_private_keys(&mut BufReader::new(Cursor::new(RSA))).unwrap();
+    let mut keys = keys.drain(..).map(rustls::PrivateKey);
 
-        let mut config = ServerConfig::new(rustls::NoClientAuth::new());
-        config
-            .set_single_cert(cert, keys.pop().unwrap())
-            .expect("invalid key or certificate");
-        let acceptor = TlsAcceptor::from(Arc::new(config));
+    let config = rustls::ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(cert, keys.next().unwrap())
+        .unwrap();
+    let acceptor = TlsAcceptor::from(Arc::new(config));
 
-        let (send, recv) = channel();
+    let (send, recv) = channel();
 
-        smol::spawn(async move {
-            let done = async move {
-                async move {
-                    let addr = SocketAddr::from(([127, 0, 0, 1], 0));
-                    let listener = TcpListener::bind(&addr).await?;
+    thread::spawn(move || {
+        smol::block_on(
+            async move {
+                let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+                let listener = TcpListener::bind(&addr).await?;
 
-                    send.send(listener.local_addr()?).unwrap();
+                send.send(listener.local_addr()?).unwrap();
 
-                    while let Some(stream) = listener.incoming().try_next().await? {
-                        let acceptor = acceptor.clone();
-                        let fut = async move {
-                            async move {
-                                let stream = acceptor.accept(stream).await?;
+                loop {
+                    let (stream, _) = listener.accept().await?;
 
-                                let (mut reader, mut writer) = split(stream);
-                                copy(&mut reader, &mut writer).await?;
+                    let acceptor = acceptor.clone();
+                    let fut = async move {
+                        let stream = acceptor.accept(stream).await?;
 
-                                Ok(()) as io::Result<()>
-                            }
-                            .await
-                            .unwrap_or_else(|err| eprintln!("server: {:?}", err));
-                        };
+                        let (mut reader, mut writer) = split(stream);
+                        copy(&mut reader, &mut writer).await?;
 
-                        smol::spawn(fut).detach();
+                        Ok(()) as io::Result<()>
                     }
-                    Ok(())
+                    .unwrap_or_else(|err| eprintln!("server: {:?}", err));
+
+                    smol::spawn(fut).detach();
                 }
-                .await
-                .unwrap_or_else(|err: io::Error| eprintln!("server: {:?}", err));
-            };
-            done.await;
-        })
-        .detach();
+            }
+            .unwrap_or_else(|err: io::Error| eprintln!("server: {:?}", err)),
+        );
+    });
 
-        let addr = recv.recv().unwrap();
-        (addr, "testserver.com", CHAIN)
-    };
-}
+    let addr = recv.recv().unwrap();
+    (addr, "foobar.com", CHAIN)
+});
 
-fn start_server() -> &'static (SocketAddr, &'static str, &'static str) {
-    &*TEST_SERVER
+fn start_server() -> &'static (SocketAddr, &'static str, &'static [u8]) {
+    &TEST_SERVER
 }
 
 async fn start_client(addr: SocketAddr, domain: &str, config: Arc<ClientConfig>) -> io::Result<()> {
-    const FILE: &[u8] = include_bytes!("../Cargo.toml");
+    const FILE: &[u8] = include_bytes!("../README.md");
 
-    let domain = webpki::DNSNameRef::try_from_ascii_str(domain).unwrap();
+    let domain = rustls::ServerName::try_from(domain).unwrap();
     let config = TlsConnector::from(config);
     let mut buf = vec![0; FILE.len()];
 
@@ -100,12 +102,24 @@ fn pass() -> io::Result<()> {
         use std::time::*;
         smol::Timer::after(Duration::from_secs(1)).await;
 
-        let mut config = ClientConfig::new();
-        let mut chain = BufReader::new(Cursor::new(chain));
-        config.root_store.add_pem_file(&mut chain).unwrap();
+        let chain = certs(&mut std::io::Cursor::new(*chain)).unwrap();
+        let trust_anchors = chain.iter().map(|cert| {
+            let ta = webpki::TrustAnchor::try_from_cert_der(&cert[..]).unwrap();
+            OwnedTrustAnchor::from_subject_spki_name_constraints(
+                ta.subject,
+                ta.spki,
+                ta.name_constraints,
+            )
+        });
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.add_server_trust_anchors(trust_anchors.into_iter());
+        let config = rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
         let config = Arc::new(config);
 
-        start_client(*addr, domain, config.clone()).await?;
+        start_client(*addr, domain, config).await?;
 
         Ok(())
     })
@@ -116,9 +130,21 @@ fn fail() -> io::Result<()> {
     smol::block_on(async {
         let (addr, domain, chain) = start_server();
 
-        let mut config = ClientConfig::new();
-        let mut chain = BufReader::new(Cursor::new(chain));
-        config.root_store.add_pem_file(&mut chain).unwrap();
+        let chain = certs(&mut std::io::Cursor::new(*chain)).unwrap();
+        let trust_anchors = chain.iter().map(|cert| {
+            let ta = webpki::TrustAnchor::try_from_cert_der(&cert[..]).unwrap();
+            OwnedTrustAnchor::from_subject_spki_name_constraints(
+                ta.subject,
+                ta.spki,
+                ta.name_constraints,
+            )
+        });
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.add_server_trust_anchors(trust_anchors.into_iter());
+        let config = rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
         let config = Arc::new(config);
 
         assert_ne!(domain, &"google.com");
@@ -128,3 +154,29 @@ fn fail() -> io::Result<()> {
         Ok(())
     })
 }
+
+// This test is a follow-up from https://github.com/tokio-rs/tls/issues/85
+#[test]
+fn lazy_config_acceptor_eof() {
+    smol::block_on(async {
+        let buf = Cursor::new(Vec::new());
+        let acceptor =
+            LazyConfigAcceptor::new(rustls::server::Acceptor::default(), AssertAsync::new(buf));
+        let acceptor = async move { Ok(acceptor.await) };
+        let timeout = async {
+            smol::Timer::after(Duration::from_secs(3)).await;
+            Err(())
+        };
+
+        let accept_result = acceptor.or(timeout).await.expect("timeout");
+
+        match accept_result {
+            Ok(_) => panic!("accepted a connection from zero bytes of data"),
+            Err(e) if e.kind() == ErrorKind::UnexpectedEof => {}
+            Err(e) => panic!("unexpected error: {:?}", e),
+        }
+    });
+}
+
+// Include `utils` module
+include!("utils.rs");

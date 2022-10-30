@@ -1,10 +1,11 @@
 [package]
 name = "server"
 version = "0.1.0"
-authors = ["quininer <quininer@live.com>"]
+authors = ["quininer <quininer@live.com>", "John Nunley <jtnunley01@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-tokio = { version = "0.2", features = [ "full" ] }
 argh = "0.1"
-tokio-rustls = { path = "../.." }
+async-rustls = { path = "../.." }
+rustls-pemfile = "0.2.1"
+smol = "1"
