@@ -173,6 +173,7 @@ where
                 match self.write_io(cx) {
                     Poll::Ready(Ok(n)) => {
                         wrlen += n;
+                        need_flush = true;
                     }
                     Poll::Pending => {
                         write_would_block = true;
