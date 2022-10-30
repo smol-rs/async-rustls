@@ -53,23 +53,23 @@ impl TlsState {
 
     #[inline]
     #[cfg(not(feature = "early-data"))]
-    pub const fn is_early_data(&self) -> bool {
+    pub fn is_early_data(&self) -> bool {
         false
     }
 }
 
-pub struct Stream<'a, IO, C> {
+pub struct Stream<'a, IO, S> {
     pub io: &'a mut IO,
-    pub session: &'a mut C,
+    pub session: &'a mut S,
     pub eof: bool,
 }
 
-impl<'a, IO: AsyncRead + AsyncWrite + Unpin, C, SD> Stream<'a, IO, C>
+impl<'a, IO: AsyncRead + AsyncWrite + Unpin, S, SD> Stream<'a, IO, S>
 where
-    C: DerefMut + Deref<Target = ConnectionCommon<SD>>,
+    S: DerefMut + Deref<Target = ConnectionCommon<SD>>,
     SD: SideData,
 {
-    pub fn new(io: &'a mut IO, session: &'a mut C) -> Self {
+    pub fn new(io: &'a mut IO, session: &'a mut S) -> Self {
         Stream {
             io,
             session,
@@ -146,6 +146,7 @@ where
                 self.poll_with(|io, cx| io.poll_write_vectored(cx, bufs))
             }
 
+            #[inline]
             fn flush(&mut self) -> io::Result<()> {
                 self.poll_with(|io, cx| io.poll_flush(cx))
             }
@@ -172,7 +173,6 @@ where
                 match self.write_io(cx) {
                     Poll::Ready(Ok(n)) => {
                         wrlen += n;
-                        need_flush = true;
                     }
                     Poll::Pending => {
                         write_would_block = true;
@@ -221,9 +221,9 @@ where
     }
 }
 
-impl<'a, IO: AsyncRead + AsyncWrite + Unpin, C, SD> AsyncRead for Stream<'a, IO, C>
+impl<'a, IO: AsyncRead + AsyncWrite + Unpin, S, SD> AsyncRead for Stream<'a, IO, S>
 where
-    C: DerefMut + Deref<Target = ConnectionCommon<SD>>,
+    S: DerefMut + Deref<Target = ConnectionCommon<SD>>,
     SD: SideData,
 {
     fn poll_read(
@@ -237,6 +237,7 @@ where
         while !self.eof && self.session.wants_read() {
             match self.read_io(cx) {
                 Poll::Ready(Ok(0)) => {
+                    self.eof = true;
                     break;
                 }
                 Poll::Ready(Ok(_)) => (),

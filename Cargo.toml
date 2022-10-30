@@ -4,9 +4,10 @@ version = "0.3.0"
 authors = [
   "Alex Crichton <alex@alexcrichton.com>",
   "quininer kel <quininer@live.com>",
+  "Stjepan Glavina <stjepang@gmail.com>",
   "John Nunley <jtnunley01@gmail.com>",
 ]
-license = "MIT/Apache-2.0"
+license = "Apache-2.0 OR MIT"
 repository = "https://github.com/smol-rs/async-rustls"
 homepage = "https://github.com/smol-rs/async-rustls"
 documentation = "https://docs.rs/async-rustls"
@@ -34,4 +35,4 @@ futures-util = "0.3.1"
 lazy_static = "1"
 webpki-roots = "0.22"
 rustls-pemfile = "1"
-once_cell = "1.14.0"
+once_cell = "1.14"

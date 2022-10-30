@@ -182,19 +182,16 @@ where
             let io = match this.io.as_mut() {
                 Some(io) => io,
                 None => {
-                    return Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "acceptor cannot be polled after acceptance",
-                    )))
+                    panic!("Acceptor cannot be polled after acceptance.");
                 }
             };
 
             let mut reader = common::SyncReadAdapter { io, cx };
             match this.acceptor.read_tls(&mut reader) {
-                Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()).into(),
+                Ok(0) => return Poll::Ready(Err(io::ErrorKind::UnexpectedEof.into())),
                 Ok(_) => {}
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Poll::Pending,
-                Err(e) => return Err(e).into(),
+                Err(e) => return Poll::Ready(Err(e)),
             }
 
             match this.acceptor.accept() {
@@ -406,6 +403,7 @@ impl<S> AsRawFd for TlsStream<S>
 where
     S: AsRawFd,
 {
+    #[inline]
     fn as_raw_fd(&self) -> RawFd {
         self.get_ref().0.as_raw_fd()
     }
@@ -416,6 +414,7 @@ impl<S> AsRawSocket for TlsStream<S>
 where
     S: AsRawSocket,
 {
+    #[inline]
     fn as_raw_socket(&self) -> RawSocket {
         self.get_ref().0.as_raw_socket()
     }

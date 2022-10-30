@@ -170,10 +170,7 @@ fn lazy_config_acceptor_eof() {
             Err(())
         };
 
-        let accept_result = match acceptor.or(timeout).await {
-            Ok(res) => res,
-            Err(_elapsed) => panic!("timeout"),
-        };
+        let accept_result = acceptor.or(timeout).await.expect("timeout");
 
         match accept_result {
             Ok(_) => panic!("accepted a connection from zero bytes of data"),

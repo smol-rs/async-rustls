@@ -15,10 +15,7 @@ impl<'a> AsyncRead for Good<'a> {
         _cx: &mut Context<'_>,
         mut buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        Poll::Ready(match self.0.write_tls(buf.by_ref()) {
-            Ok(n) => Ok(n),
-            Err(err) => Err(err),
-        })
+        Poll::Ready(self.0.write_tls(buf.by_ref()))
     }
 }
 
@@ -44,7 +41,6 @@ impl<'a> AsyncWrite for Good<'a> {
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.0.send_close_notify();
-        dbg!("sent close notify");
         self.poll_flush(cx)
     }
 }
@@ -88,9 +84,8 @@ impl AsyncRead for Expected {
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
         let this = self.get_mut();
-        let n = std::io::Read::read(&mut this.0, buf)?;
 
-        Poll::Ready(Ok(n))
+        Poll::Ready(std::io::Read::read(&mut this.0, buf))
     }
 }
 

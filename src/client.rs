@@ -39,6 +39,7 @@ impl<S> AsRawFd for TlsStream<S>
 where
     S: AsRawFd,
 {
+    #[inline]
     fn as_raw_fd(&self) -> RawFd {
         self.get_ref().0.as_raw_fd()
     }
@@ -49,6 +50,7 @@ impl<S> AsRawSocket for TlsStream<S>
 where
     S: AsRawSocket,
 {
+    #[inline]
     fn as_raw_socket(&self) -> RawSocket {
         self.get_ref().0.as_raw_socket()
     }
@@ -155,6 +157,9 @@ where
                 if let Some(mut early_data) = stream.session.early_data() {
                     let len = match early_data.write(buf) {
                         Ok(n) => n,
+                        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {
+                            return Poll::Pending
+                        }
                         Err(err) => return Poll::Ready(Err(err)),
                     };
                     if len != 0 {
@@ -222,12 +227,10 @@ where
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        // complete handshake
         #[cfg(feature = "early-data")]
-        {
-            // complete handshake
-            if matches!(self.state, TlsState::EarlyData(..)) {
-                ready!(self.as_mut().poll_flush(cx))?;
-            }
+        if matches!(self.state, TlsState::EarlyData(..)) {
+            ready!(self.as_mut().poll_flush(cx))?;
         }
 
         if self.state.writeable() {

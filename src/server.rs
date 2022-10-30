@@ -131,6 +131,7 @@ impl<IO> AsRawFd for TlsStream<IO>
 where
     IO: AsRawFd,
 {
+    #[inline]
     fn as_raw_fd(&self) -> RawFd {
         self.get_ref().0.as_raw_fd()
     }
@@ -141,6 +142,7 @@ impl<IO> AsRawSocket for TlsStream<IO>
 where
     IO: AsRawSocket,
 {
+    #[inline]
     fn as_raw_socket(&self) -> RawSocket {
         self.get_ref().0.as_raw_socket()
     }
