@@ -161,7 +161,7 @@ fn lazy_config_acceptor_eof() {
     smol::block_on(async {
         let buf = Cursor::new(Vec::new());
         let acceptor = LazyConfigAcceptor::new(
-            rustls::server::Acceptor::new().unwrap(),
+            rustls::server::Acceptor::default(),
             AssertAsync::new(buf),
         );
         let acceptor = async move { Ok(acceptor.await) };
