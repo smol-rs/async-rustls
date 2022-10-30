@@ -160,10 +160,8 @@ fn fail() -> io::Result<()> {
 fn lazy_config_acceptor_eof() {
     smol::block_on(async {
         let buf = Cursor::new(Vec::new());
-        let acceptor = LazyConfigAcceptor::new(
-            rustls::server::Acceptor::default(),
-            AssertAsync::new(buf),
-        );
+        let acceptor =
+            LazyConfigAcceptor::new(rustls::server::Acceptor::default(), AssertAsync::new(buf));
         let acceptor = async move { Ok(acceptor.await) };
         let timeout = async {
             smol::Timer::after(Duration::from_secs(3)).await;
