@@ -1,3 +1,7 @@
+# Version 0.3.0
+
+- Update rustls to 0.20. (#9)
+
 # Version 0.2.0
 
 - Update rustls to 0.19.
