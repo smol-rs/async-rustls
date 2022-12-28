@@ -56,12 +56,12 @@ static TEST_SERVER: Lazy<(SocketAddr, &'static str, &'static [u8])> = Lazy::new(
 
                         Ok(()) as io::Result<()>
                     }
-                    .unwrap_or_else(|err| eprintln!("server: {:?}", err));
+                    .unwrap_or_else(|err| eprintln!("server: {err:?}"));
 
                     smol::spawn(fut).detach();
                 }
             }
-            .unwrap_or_else(|err: io::Error| eprintln!("server: {:?}", err)),
+            .unwrap_or_else(|err: io::Error| eprintln!("server: {err:?}")),
         );
     });
 

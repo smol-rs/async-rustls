@@ -16,7 +16,7 @@ async fn get(
     port: u16,
 ) -> io::Result<(TlsStream<TcpStream>, String)> {
     let connector = TlsConnector::from(config);
-    let input = format!("GET / HTTP/1.0\r\nHost: {}\r\n\r\n", domain);
+    let input = format!("GET / HTTP/1.0\r\nHost: {domain}\r\n\r\n");
 
     let addr = (domain, port).to_socket_addrs()?.next().unwrap();
     let domain = rustls::ServerName::try_from(domain).unwrap();
