@@ -19,7 +19,7 @@ edition = "2018"
 [dependencies]
 futures-io = "0.3.24"
 rustls = { version = "0.21", default-features = false }
-webpki = "0.22"
+rustls-webpki = "0.100"
 
 [features]
 default = ["logging", "tls12"]
