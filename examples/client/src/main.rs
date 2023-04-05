@@ -1,6 +1,6 @@
 use argh::FromArgs;
 use async_rustls::rustls::{self, OwnedTrustAnchor};
-use async_rustls::{webpki, TlsConnector};
+use async_rustls::TlsConnector;
 use smol::io::{copy, split, AsyncWriteExt};
 use smol::net::TcpStream;
 use smol::prelude::*;

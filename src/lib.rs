@@ -27,7 +27,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 pub use rustls;
-pub use webpki;
 
 /// A wrapper around a `rustls::ClientConfig`, providing an async `connect` method.
 #[derive(Clone)]
