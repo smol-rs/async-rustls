@@ -16,6 +16,10 @@ description = "Asynchronous TLS/SSL streams using Rustls."
 categories = ["asynchronous", "cryptography", "network-programming"]
 edition = "2018"
 
+[workspace]
+resolver = "2"
+members = ["examples/client", "examples/server"]
+
 [dependencies]
 futures-io = "0.3.24"
 rustls = { version = "0.21", default-features = false }
