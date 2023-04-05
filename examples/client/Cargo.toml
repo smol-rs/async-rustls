@@ -7,6 +7,6 @@ edition = "2018"
 [dependencies]
 argh = "0.1"
 async-rustls = { path = "../.." }
-webpki-roots = "0.22"
+webpki-roots = "0.23"
 rustls-pemfile = "1"
 smol = "1"
