@@ -1,3 +1,8 @@
+# Version 0.4.0
+
+- **Breaking:** Update rustls to 0.21. (#14)
+- **Breaking::** Remove webpki from the public API. (#15, #17)
+
 # Version 0.3.0
 
 - Update rustls to 0.20. (#9)
