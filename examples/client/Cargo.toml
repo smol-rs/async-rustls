@@ -8,6 +8,6 @@ edition = "2018"
 argh = "0.1"
 async-rustls = { path = "../.." }
 rustls-pemfile = "1"
-rustls-webpki = "0.100"
+rustls-webpki = "0.101"
 smol = "1"
 webpki-roots = "0.23"
