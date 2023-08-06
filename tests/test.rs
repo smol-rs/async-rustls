@@ -112,7 +112,7 @@ fn pass() -> io::Result<()> {
             )
         });
         let mut root_store = rustls::RootCertStore::empty();
-        root_store.add_server_trust_anchors(trust_anchors.into_iter());
+        root_store.add_trust_anchors(trust_anchors.into_iter());
         let config = rustls::ClientConfig::builder()
             .with_safe_defaults()
             .with_root_certificates(root_store)
@@ -140,7 +140,7 @@ fn fail() -> io::Result<()> {
             )
         });
         let mut root_store = rustls::RootCertStore::empty();
-        root_store.add_server_trust_anchors(trust_anchors.into_iter());
+        root_store.add_trust_anchors(trust_anchors.into_iter());
         let config = rustls::ClientConfig::builder()
             .with_safe_defaults()
             .with_root_certificates(root_store)

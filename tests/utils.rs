@@ -35,7 +35,7 @@ mod utils {
                 ta.name_constraints,
             )
         });
-        client_root_cert_store.add_server_trust_anchors(trust_anchors.into_iter());
+        client_root_cert_store.add_trust_anchors(trust_anchors.into_iter());
         let cconfig = ClientConfig::builder()
             .with_safe_defaults()
             .with_root_certificates(client_root_cert_store)
