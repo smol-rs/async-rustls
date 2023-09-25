@@ -1,3 +1,7 @@
+# Version 0.4.1
+
+- Add `smol-rs` logo to docs. (#23)
+
 # Version 0.4.0
 
 - **Breaking:** Update rustls to 0.21. (#14)
