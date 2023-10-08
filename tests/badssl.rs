@@ -5,7 +5,6 @@ use async_rustls::{
 };
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 use smol::net::TcpStream;
-use std::convert::TryFrom;
 use std::io;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;

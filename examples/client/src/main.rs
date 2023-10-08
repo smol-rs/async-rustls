@@ -5,7 +5,6 @@ use smol::io::{copy, split, AsyncWriteExt};
 use smol::net::TcpStream;
 use smol::prelude::*;
 use smol::Unblock;
-use std::convert::TryFrom;
 use std::fs::File;
 use std::io;
 use std::io::BufReader;
