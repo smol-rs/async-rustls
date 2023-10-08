@@ -2,7 +2,8 @@
 name = "client"
 version = "0.1.0"
 authors = ["quininer <quininer@live.com>", "John Nunley <jtnunley01@gmail.com>"]
-edition = "2018"
+edition = "2021"
+publish = false
 
 [dependencies]
 argh = "0.1"

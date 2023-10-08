@@ -9,7 +9,6 @@ use smol::net::TcpStream;
 use smol::prelude::*;
 use smol::Timer;
 use smol::{future, future::Future};
-use std::convert::TryFrom;
 use std::io::{self, BufRead, BufReader, Cursor};
 use std::net::SocketAddr;
 use std::pin::Pin;

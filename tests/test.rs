@@ -6,7 +6,6 @@ use rustls_pemfile::{certs, rsa_private_keys};
 use smol::io::{copy, split, AssertAsync, AsyncReadExt, AsyncWriteExt};
 use smol::net::{TcpListener, TcpStream};
 use smol::prelude::*;
-use std::convert::TryFrom;
 use std::io::{BufReader, Cursor, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::mpsc::channel;
