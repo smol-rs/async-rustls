@@ -43,6 +43,13 @@ jobs:
         run: cargo check -Z features=dev_dep
       - run: cargo test
 
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@cargo-hack
+      - run: cargo hack build --workspace --no-private --no-dev-deps --rust-version
+
   clippy:
     runs-on: ubuntu-latest
     steps:
