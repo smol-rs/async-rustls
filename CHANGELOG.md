@@ -1,28 +1,32 @@
-# Version 0.4.1
+# Version 0.4.2
 
-- Add `smol-rs` logo to docs. (#23)
+- Bump MSRV to 1.61. (9e04a0619dda7296bab757cc80411908650b78c1)
 
-# Version 0.4.0
+# version 0.4.1
 
-- **Breaking:** Update rustls to 0.21. (#14)
-- **Breaking::** Remove webpki from the public API. (#15, #17)
+- add `smol-rs` logo to docs. (#23)
 
-# Version 0.3.0
+# version 0.4.0
 
-- Update rustls to 0.20. (#9)
+- **breaking:** update rustls to 0.21. (#14)
+- **breaking::** remove webpki from the public api. (#15, #17)
 
-# Version 0.2.0
+# version 0.3.0
 
-- Update rustls to 0.19.
+- update rustls to 0.20. (#9)
 
-# Version 0.1.2
+# version 0.2.0
 
-- Expose feature flags from rustls.
+- update rustls to 0.19.
 
-# Version 0.1.1
+# version 0.1.2
 
-- Add more info to Cargo.toml
+- expose feature flags from rustls.
 
-# Version 0.1.0
+# version 0.1.1
+
+- add more info to cargo.toml
+
+# version 0.1.0
 
 - Initial version
