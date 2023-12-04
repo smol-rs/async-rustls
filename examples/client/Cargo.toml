@@ -9,6 +9,6 @@ publish = false
 argh = "0.1"
 async-rustls = { path = "../.." }
 rustls-pemfile = "1"
-rustls-webpki = "0.101"
+rustls-webpki = "0.102"
 smol = "1"
 webpki-roots = "0.25"
