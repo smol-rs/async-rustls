@@ -8,5 +8,5 @@ publish = false
 [dependencies]
 argh = "0.1"
 async-rustls = { path = "../.." }
-rustls-pemfile = "1"
+rustls-pemfile = "2"
 smol = "1"
