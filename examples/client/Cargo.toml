@@ -11,4 +11,4 @@ async-rustls = { path = "../.." }
 rustls-pemfile = "1"
 rustls-webpki = "0.101"
 smol = "1"
-webpki-roots = "0.25"
+webpki-roots = "0.26"
