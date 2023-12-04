@@ -23,7 +23,7 @@ members = ["examples/client", "examples/server"]
 
 [dependencies]
 futures-io = "0.3.24"
-rustls = { version = "0.21", default-features = false }
+rustls = { version = "0.22", default-features = false }
 
 [features]
 default = ["logging", "tls12"]
