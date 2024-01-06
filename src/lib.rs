@@ -6,6 +6,10 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/smol-rs/smol/master/assets/images/logo_fullsize_transparent.png"
 )]
+#![deprecated(
+    since = "0.4.2",
+    note = "This crate is now deprecated in favor of [futures-rustls](https://crates.io/crates/futures-rustls)."
+)]
 
 macro_rules! ready {
     ( $e:expr ) => {
