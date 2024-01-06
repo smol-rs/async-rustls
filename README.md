@@ -1,4 +1,4 @@
-# async-rustls
+# async-rustls (deprecated)
 
 [![Build](https://github.com/smol-rs/async-rustls/workflows/Build%20and%20test/badge.svg)](
 https://github.com/smol-rs/async-rustls/actions)
@@ -8,6 +8,8 @@ https://github.com/smol-rs/async-rustls)
 https://crates.io/crates/async-rustls)
 [![Documentation](https://docs.rs/async-rustls/badge.svg)](
 https://docs.rs/async-rustls)
+
+**This crate is now deprecated in favor of [futures-rustls](https://crates.io/crates/futures-rustls).**
 
 Asynchronous TLS/SSL streams using [`rustls`].
 

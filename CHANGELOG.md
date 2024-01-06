@@ -1,3 +1,7 @@
+# Version 0.4.2
+
+- This crate is now deprecated in favor of [futures-rustls](https://crates.io/crates/futures-rustls).
+
 # Version 0.4.1
 
 - Add `smol-rs` logo to docs. (#23)
